@@ -49,7 +49,7 @@ jobs:
           from pathlib import Path
           import cairosvg
           root=Path('TradePilot/android/app/src/main/res')
-          svg='TradePilot/brand-logo.svg'
+          svg=str(list(Path('TradePilot').rglob('brand-logo.svg'))[0])
           sizes={'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
           for folder,size in sizes.items():
             target=root/folder
