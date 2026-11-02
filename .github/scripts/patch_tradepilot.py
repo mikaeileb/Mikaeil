@@ -142,7 +142,8 @@ source = source.replace('getCandles(settings.symbol,settings.timeframe,280)', 'g
 source = source.replace('getCandles(symbol,settings.timeframe,180)', 'getCandles(symbol,settings.timeframe,300)')
 source = source.replace('limit:String(Math.min(limit,500))', 'limit:String(Math.min(limit,1000))')
 source = source.replace('قدرت هم‌گرایی $' + '{a.confidence}%', 'تکمیل شروط $' + '{a.setups.length}/4')
-source = source.replace('امتیاز 
+dollar = chr(36)
+source = source.replace('امتیاز ' + dollar + '{num(r.analysis.score,1)} · ' + dollar + '{r.analysis.confidence}%', 'تکمیل شروط ' + dollar + "{r.analysis.direction==='NONE'?0:r.analysis.setups.length}/4")
 
 bt_start = source.index('  function runBacktest() {')
 bt_end = source.index('  function addCurrentSignalToJournal()', bt_start)
