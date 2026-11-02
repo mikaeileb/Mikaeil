@@ -1,5 +1,10 @@
 name: Build FocusLife Android APK
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'focuslife/**'
+      - '.github/workflows/build-focuslife-android.yml'
   pull_request:
     paths:
       - 'focuslife/**'
