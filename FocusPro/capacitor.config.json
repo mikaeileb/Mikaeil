@@ -1,0 +1,9 @@
+{
+  "appId": "com.mikaeil.focuspro",
+  "appName": "FocusPro",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false
+  }
+}

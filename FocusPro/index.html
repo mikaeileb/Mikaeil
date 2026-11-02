@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <meta name="description" content="FocusPro - تایمر هوشمند مطالعه، گزارش و تحلیل پیشرفت" />
+  <title>FocusPro | تمرکز هوشمند</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark">F</div><div><b>FocusPro</b><small>تمرکز هوشمند</small></div></div>
+      <button class="icon-btn" id="themeBtn" aria-label="تغییر تم">☼</button>
+    </header>
+    <main id="app">
+      <section class="welcome"><div><span class="eyebrow" id="todayLabel">امروز</span><h1>آماده‌ای متمرکز بشی؟</h1><p>هر جلسه کوچک، یک قدم به هدف بزرگ‌تر.</p></div><div class="streak-pill">🔥 <b id="streakTop">۰</b><small>روز متوالی</small></div></section>
+      <nav class="tabs" aria-label="بخش‌های برنامه">
+        <button class="tab active" data-tab="focus">تمرکز</button><button class="tab" data-tab="reports">گزارش‌ها</button><button class="tab" data-tab="insights">تحلیل هوشمند</button><button class="tab" data-tab="settings">تنظیمات</button>
+      </nav>
+      <section class="page active" id="page-focus">
+        <div class="focus-layout">
+          <article class="panel timer-panel">
+            <div class="panel-head"><div><span class="eyebrow">جلسه فعلی</span><h2>زمان تمرکز</h2></div><span class="live-dot">آماده</span></div>
+            <label class="field-label" for="subject">موضوع مطالعه</label>
+            <input id="subject" class="text-input" maxlength="48" placeholder="مثلاً پایتون، زبان انگلیسی..." value="مطالعه آزاد">
+            <div class="mode-switch"><button class="mode active" data-mode="focus">تمرکز</button><button class="mode" data-mode="short">استراحت کوتاه</button><button class="mode" data-mode="long">استراحت بلند</button></div>
+            <div class="timer-wrap"><svg class="timer-ring" viewBox="0 0 260 260"><circle class="ring-bg" cx="130" cy="130" r="116"/><circle class="ring-progress" id="ringProgress" cx="130" cy="130" r="116"/></svg><div class="timer-center"><strong id="timerText">۲۵:۰۰</strong><span id="timerCaption">زمان باقی‌مانده</span><small id="timerSub">برای شروع آماده‌ای؟</small></div></div>
+            <div class="timer-actions"><button class="btn primary" id="startBtn">شروع تمرکز</button><button class="btn secondary" id="resetBtn">بازنشانی</button></div>
+            <div class="quick-times"><span>مدت جلسه:</span><button data-min="15">۱۵ دقیقه</button><button class="selected" data-min="25">۲۵ دقیقه</button><button data-min="45">۴۵ دقیقه</button><button data-min="50">۵۰ دقیقه</button><button data-min="60">۶۰ دقیقه</button></div>
+            <div class="session-note"><span>💡</span><span id="focusTip">فقط روی یک کار تمرکز کن؛ اعلان‌های اضافی را ببند.</span></div>
+          </article>
+          <aside class="side-column">
+            <article class="panel goal-card"><span class="eyebrow">هدف امروز</span><div class="goal-number"><strong id="todayMinutes">۰</strong><span>دقیقه از <b id="goalMinutes">۱۲۰</b> دقیقه</span></div><div class="progress-track"><i id="goalProgress"></i></div><div class="goal-foot"><span id="goalPercent">۰٪ تکمیل شده</span><button class="text-button" id="editGoal">تغییر هدف</button></div></article>
+            <article class="panel mini-stats"><div class="panel-head"><h3>عملکرد امروز</h3><span class="muted">تا این لحظه</span></div><div class="stat-row"><span>⏱ زمان مطالعه</span><b id="statTime">۰ دقیقه</b></div><div class="stat-row"><span>✓ جلسات کامل</span><b id="statSessions">۰</b></div><div class="stat-row"><span>🎯 میانگین تمرکز</span><b id="statFocus">—</b></div></article>
+            <article class="panel recent-card"><div class="panel-head"><h3>آخرین جلسات</h3><button class="text-button" data-goto="reports">همه گزارش‌ها</button></div><div id="recentList" class="recent-list"><div class="empty">هنوز جلسه‌ای ثبت نشده است.</div></div></article>
+          </aside>
+        </div>
+      </section>
+      <section class="page" id="page-reports">
+        <div class="section-heading"><div><span class="eyebrow">مرور پیشرفت</span><h2>گزارش مطالعه</h2><p>روند واقعی تلاش‌هایت را ببین.</p></div><button class="btn secondary small" id="exportCsv">خروجی CSV</button></div>
+        <div class="metric-grid"><article class="panel metric"><span>امروز</span><b id="repToday">۰ دقیقه</b><small>زمان مطالعه</small></article><article class="panel metric"><span>این هفته</span><b id="repWeek">۰ دقیقه</b><small>زمان مطالعه</small></article><article class="panel metric"><span>این ماه</span><b id="repMonth">۰ دقیقه</b><small>زمان مطالعه</small></article><article class="panel metric"><span>میانگین روزانه</span><b id="repAverage">۰ دقیقه</b><small>در ۷ روز اخیر</small></article></div>
+        <article class="panel chart-panel"><div class="panel-head"><div><h3>روند مطالعه</h3><span class="muted">مجموع دقایق مطالعه در هر روز</span></div><select id="chartRange" class="select-input"><option value="7">۷ روز</option><option value="14">۱۴ روز</option><option value="30">۳۰ روز</option></select></div><div id="lineChart" class="chart-box"></div><div class="chart-legend"><i></i> دقیقه مطالعه</div></article>
+        <div class="report-columns"><article class="panel"><div class="panel-head"><h3>تفکیک موضوعات</h3></div><div id="subjectBreakdown" class="breakdown"></div></article><article class="panel"><div class="panel-head"><h3>تاریخچه جلسات</h3><span class="muted" id="sessionCount">۰ جلسه</span></div><div id="historyList" class="history-list"></div></article></div>
+      </section>
+      <section class="page" id="page-insights">
+        <div class="section-heading"><div><span class="eyebrow">تحلیل مبتنی بر داده</span><h2>مربی هوشمند مطالعه</h2><p>پیشنهادها از گزارش‌های ثبت‌شده خودت ساخته می‌شوند.</p></div><span class="ai-badge">✦ SMART</span></div>
+        <div class="insight-hero panel"><div class="insight-icon">✦</div><div><h3 id="insightTitle">شروع یک مسیر تازه</h3><p id="insightSummary">با ثبت چند جلسه، تحلیل روند و پیشنهادهای شخصی‌سازی‌شده اینجا نمایش داده می‌شوند.</p></div></div>
+        <div class="insight-grid"><article class="panel"><span class="eyebrow">بهترین ساعت</span><b class="insight-value" id="bestHour">هنوز مشخص نیست</b><small>بر اساس جلسات کامل</small></article><article class="panel"><span class="eyebrow">بهترین روز هفته</span><b class="insight-value" id="bestDay">هنوز مشخص نیست</b><small>بیشترین زمان مطالعه</small></article><article class="panel"><span class="eyebrow">رکورد روزانه</span><b class="insight-value" id="bestDayRecord">۰ دقیقه</b><small>بیشترین زمان ثبت‌شده</small></article><article class="panel"><span class="eyebrow">نرخ تکمیل</span><b class="insight-value" id="completionRate">—</b><small>جلسات کامل به کل جلسات</small></article></div>
+        <article class="panel suggestions"><div class="panel-head"><h3>پیشنهادهای بعدی</h3><span class="ai-badge">تحلیل خودکار</span></div><div id="suggestionList"></div></article>
+      </section>
+      <section class="page" id="page-settings">
+        <div class="section-heading"><div><span class="eyebrow">شخصی‌سازی</span><h2>تنظیمات و اطلاعات</h2><p>FocusPro را مطابق سبک مطالعه‌ات تنظیم کن.</p></div></div>
+        <article class="panel settings-card"><h3>زمان‌بندی پومودورو</h3><div class="setting-row"><label for="focusLength">مدت تمرکز (دقیقه)</label><input id="focusLength" type="number" min="5" max="120" value="25"></div><div class="setting-row"><label for="shortLength">استراحت کوتاه</label><input id="shortLength" type="number" min="1" max="30" value="5"></div><div class="setting-row"><label for="longLength">استراحت بلند</label><input id="longLength" type="number" min="5" max="60" value="15"></div><div class="setting-row"><label for="longEvery">استراحت بلند بعد از چند جلسه؟</label><input id="longEvery" type="number" min="2" max="8" value="4"></div><button class="btn primary" id="saveSettings">ذخیره تنظیمات</button></article>
+        <article class="panel settings-card"><h3>هدف مطالعه</h3><div class="setting-row"><label for="dailyGoal">هدف روزانه (دقیقه)</label><input id="dailyGoal" type="number" min="15" max="1000" value="120"></div><button class="btn primary" id="saveGoal">ذخیره هدف</button></article>
+        <article class="panel settings-card"><h3>پشتیبان‌گیری و حریم خصوصی</h3><p class="muted">گزارش‌ها به‌صورت محلی روی همین گوشی ذخیره می‌شوند و بدون اجازه تو جایی ارسال نمی‌شوند.</p><div class="settings-actions"><button class="btn secondary" id="backupBtn">دانلود پشتیبان JSON</button><label class="btn secondary file-label">بازیابی پشتیبان<input type="file" id="restoreFile" accept="application/json" hidden></label><button class="btn danger" id="clearData">حذف همه گزارش‌ها</button></div></article>
+        <div class="version-note">FocusPro v1.0 · طراحی‌شده برای تمرکز پایدار</div>
+      </section>
+    </main>
+    <footer class="bottom-note">ساخته شده برای روزهایی که می‌خواهی بهتر از دیروز باشی ✦</footer>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <dialog id="sessionDialog" class="modal"><form method="dialog" id="sessionForm"><div class="modal-head"><div><span class="eyebrow">جلسه به پایان رسید</span><h2>گزارش این جلسه</h2></div><button class="icon-btn" value="cancel" aria-label="بستن">×</button></div><p class="muted" id="completedSummary">آفرین! یک قدم جلوتر رفتی.</p><label class="field-label">میزان تمرکزت چقدر بود؟</label><div class="rating" id="ratingChoices"><button type="button" data-rating="1">۱</button><button type="button" data-rating="2">۲</button><button type="button" data-rating="3" class="chosen">۳</button><button type="button" data-rating="4">۴</button><button type="button" data-rating="5">۵</button></div><label class="field-label" for="sessionMemo">یادداشت (اختیاری)</label><textarea id="sessionMemo" class="text-input" rows="3" placeholder="چه چیزی یاد گرفتی؟"></textarea><button class="btn primary full" id="saveSession" value="default">ثبت گزارش</button></form></dialog>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
