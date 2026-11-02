@@ -5,6 +5,7 @@ on:
     paths:
       - 'TradePilot-Android-Project-v2.zip'
       - '.github/workflows/build-tradepilot.yml'
+      - '.github/scripts/patch_tradepilot.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,6 +18,11 @@ jobs:
         run: |
           unzip -o TradePilot-Android-Project-v2.zip -d .
           test -f TradePilot/package.json
+      - name: Upgrade analysis engine and backtester
+        run: |
+          python3 .github/scripts/patch_tradepilot.py TradePilot
+          APP_JS=$(find TradePilot -type f -name app.js -print -quit)
+          node --check "$APP_JS"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
