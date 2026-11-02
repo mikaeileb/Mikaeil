@@ -136,12 +136,244 @@ new_engine = r'''  function confirmedSwings(candles, left=2, right=2) {
 
 '''
 source = source[:start] + new_engine + source[end:]
-source = source.replace('limit=280) {', 'limit=500) {')
-source = source.replace('getCandles(settings.symbol, settings.timeframe, 280)', 'getCandles(settings.symbol, settings.timeframe, 500)')
-source = source.replace('getCandles(settings.symbol,settings.timeframe,280)', 'getCandles(settings.symbol,settings.timeframe,500)')
+source = source.replace('limit=280) {', 'limit=1000) {')
+source = source.replace('getCandles(settings.symbol, settings.timeframe, 280)', 'getCandles(settings.symbol, settings.timeframe, 1000)')
+source = source.replace('getCandles(settings.symbol,settings.timeframe,280)', 'getCandles(settings.symbol,settings.timeframe,1000)')
 source = source.replace('getCandles(symbol,settings.timeframe,180)', 'getCandles(symbol,settings.timeframe,300)')
+source = source.replace('limit:String(Math.min(limit,500))', 'limit:String(Math.min(limit,1000))')
 source = source.replace('قدرت هم‌گرایی $' + '{a.confidence}%', 'تکمیل شروط $' + '{a.setups.length}/4')
-source = source.replace('امتیاز $' + '{num(r.analysis.score,1)} · $' + '{r.analysis.confidence}%', 'تکمیل شروط $' + '{r.analysis.setups.length}/4')
+source = source.replace('امتیاز 
+
+bt_start = source.index('  function runBacktest() {')
+bt_end = source.index('  function addCurrentSignalToJournal()', bt_start)
+new_backtest = r'''  function runBacktest() {
+    const bars=activeCandles.filter(c=>Number.isFinite(c.closeTime)?c.closeTime<Date.now()-500:true);
+    if(bars.length<220){showToast('برای بک‌تست قابل ارزیابی حداقل ۲۲۰ کندل بسته‌شده لازم است.');return;}
+    const feePerSide=0.0006,slippagePerSide=0.0002,maxHold=40,warmup=100;
+    function evaluate(from,to) {
+      const trades=[];let signals=0,expired=0,i=Math.max(from,warmup);
+      while(i<to-1) {
+        const a=analyzeCandles(bars.slice(0,i+1));
+        if(a.direction==='NONE'){i++;continue;}
+        signals++;
+        const long=a.direction==='LONG',sign=long?1:-1,next=bars[i+1];
+        const entry=next.o*(long?1+slippagePerSide:1-slippagePerSide);
+        const stop=a.stop,risk=Math.abs(entry-stop);
+        if(!(risk>0 && (long?stop<entry:stop>entry))){i++;continue;}
+        const target=entry+sign*risk*a.rr;
+        let exitPrice=null,exitIndex=null,exitReason='TIME';
+        const lastIndex=Math.min(to-1,i+maxHold);
+        for(let j=i+1;j<=lastIndex;j++) {
+          const c=bars[j];
+          if(long && c.o<=stop){exitPrice=c.o*(1-slippagePerSide);exitReason='GAP_SL';exitIndex=j;break;}
+          if(long && c.o>=target){exitPrice=c.o*(1-slippagePerSide);exitReason='GAP_TP';exitIndex=j;break;}
+          if(!long && c.o>=stop){exitPrice=c.o*(1+slippagePerSide);exitReason='GAP_SL';exitIndex=j;break;}
+          if(!long && c.o<=target){exitPrice=c.o*(1+slippagePerSide);exitReason='GAP_TP';exitIndex=j;break;}
+          const stopHit=long?c.l<=stop:c.h>=stop;
+          const targetHit=long?c.h>=target:c.l<=target;
+          if(stopHit){exitPrice=stop*(long?1-slippagePerSide:1+slippagePerSide);exitReason='SL';exitIndex=j;break;}
+          if(targetHit){exitPrice=target*(long?1-slippagePerSide:1+slippagePerSide);exitReason='TP';exitIndex=j;break;}
+          if(j===lastIndex){exitPrice=c.c*(long?1-slippagePerSide:1+slippagePerSide);exitReason='TIME';exitIndex=j;}
+        }
+        if(exitPrice===null || exitIndex===null){expired++;i++;continue;}
+        const grossR=sign*(exitPrice-entry)/risk;
+        const feesR=((entry+exitPrice)*feePerSide)/risk;
+        const netR=grossR-feesR;
+        trades.push({netR,grossR,feesR,reason:exitReason,entryIndex:i+1,exitIndex});
+        i=Math.max(i+1,exitIndex+1);
+      }
+      const wins=trades.filter(t=>t.netR>0).length,losses=trades.length-wins;
+      const netR=trades.reduce((s,t)=>s+t.netR,0),grossProfit=trades.reduce((s,t)=>s+Math.max(0,t.netR),0),grossLoss=Math.abs(trades.reduce((s,t)=>s+Math.min(0,t.netR),0));
+      let equity=0,peak=0,maxDrawdown=0;
+      for(const t of trades){equity+=t.netR;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,peak-equity);}
+      return {signals,trades:trades.length,wins,losses,expired,netR,winRate:trades.length?wins/trades.length*100:0,
+        expectancy:trades.length?netR/trades.length:0,profitFactor:grossLoss>0?grossProfit/grossLoss:null,maxDrawdown};
+    }
+    const split=Math.floor(bars.length*.7);
+    const full=evaluate(warmup,bars.length),oos=evaluate(Math.max(warmup,split),bars.length),past=evaluate(warmup,split);
+    const panel=$('backtestResult')||document.createElement('div');panel.id='backtestResult';panel.className='panel';
+    panel.style.cssText='margin-top:12px;padding:14px;line-height:1.7';
+    const fmtPF=x=>x.profitFactor===null?'—':num(x.profitFactor,2);
+    const summary=(label,x)=>'<div style="margin-top:9px;padding:11px;background:#0a1725;border:1px solid #1d3046;border-radius:11px"><strong style="font-size:12px">'+label+'</strong><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px">'+
+      '<div><small style="color:#8da1b8">معامل سود (PF)</small><b style="display:block">'+fmtPF(x)+'</b></div>'+
+      '<div><small style="color:#8da1b8">بازده خالص</small><b style="display:block">'+num(x.netR,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">نرخ برد</small><b style="display:block">'+num(x.winRate,1)+'٪ · '+x.wins+'/'+x.trades+'</b></div>'+
+      '<div><small style="color:#8da1b8">امید ریاضی</small><b style="display:block">'+num(x.expectancy,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">حداکثر افت سرمایه</small><b style="display:block">'+num(x.maxDrawdown,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">سیگنال / معاملات بسته</small><b style="display:block">'+x.signals+' / '+x.trades+'</b></div></div></div>';
+    panel.innerHTML='<strong style="font-size:13px">گزارش بک‌تست ساختار بازار</strong><p style="font-size:10px;color:#8da1b8;margin:3px 0">'+bars.length+' کندل · ورود در بازشدن کندل بعدی · بدون هم‌پوشانی معاملات · حداکثر نگهداری '+maxHold+' کندل</p>'+
+      summary('۷۰٪ بخش گذشته · بررسی تاریخی',past)+summary('۳۰٪ خارج از نمونه · مهم‌تر برای ارزیابی',oos)+summary('کل داده',full)+
+      '<div style="margin-top:10px;padding:10px;border-right:2px solid #f5bd62;background:#171f2b;border-radius:8px;font-size:9px;color:#b5c3d2">هزینه فرضی هر سمت: کارمزد ۰٫۰۶٪ + اسلیپیج ۰٫۰۲٪. اگر حد ضرر و حد سود در یک کندل لمس شوند، حد ضرر اول فرض شده است. این گزارش شبیه‌سازی است، نه تضمین سود یا پیش‌بینی آینده.</div>'+
+      (oos.trades<10?'<p style="font-size:10px;color:#f5bd62;margin:8px 0 0">نمونه خارج از نمونه کمتر از ۱۰ معامله دارد؛ برای نتیجه‌گیری آماری کافی نیست و داده بیشتری لازم است.</p>':'');
+    const chart=$('backtestBtn').closest('.chart-panel');if(panel.parentElement!==chart)chart.appendChild(panel);
+    showToast('بک‌تست تمام شد؛ نتیجه خارج از نمونه را بررسی کن.');
+  }
+
+'''
+source = source[:bt_start] + new_backtest + source[bt_end:]
+js_path.write_text(source, encoding='utf-8')
+if html_path.exists():
+    html=html_path.read_text(encoding='utf-8')
+    html=html.replace('Confluence Engine','Market Structure Engine')
+    html=html.replace('هر نماد با ۵ خانواده استراتژی بررسی می‌شود. نبود ستاپ معتبر به معنی «بدون سیگنال» است.','هر نماد با ساختار بازار، جمع‌آوری نقدینگی، شکست BOS/CHoCH و بازآزمایی Order Block یا FVG بررسی می‌شود. در نبود ستاپ کامل، سیگنالی صادر نمی‌شود.')
+    html=html.replace('<span>EMA 20/50 Trend</span><span>MACD + RSI Momentum</span><span>Volume Breakout</span><span>Bollinger Reversion</span><span>Engulfing / Pin Bar</span><span>Market Structure</span><span>ATR Stop Loss</span><span>Risk / Reward Filter</span>', '<span>Market Structure · HH/HL & LH/LL</span><span>Liquidity Sweep</span><span>BOS / CHoCH Confirmation</span><span>Order Block Retest</span><span>Fair Value Gap (FVG)</span><span>ATR Structural Stop</span><span>Risk / Reward Filter</span><span>EMA / RSI · فقط اطلاعات کمکی</span>')
+    html_path.write_text(html, encoding='utf-8')
+print('Patched:', js_path)
+print('Updated HTML:', html_path.exists()) + '{num(r.analysis.score,1)} · 
+
+bt_start = source.index('  function runBacktest() {')
+bt_end = source.index('  function addCurrentSignalToJournal()', bt_start)
+new_backtest = r'''  function runBacktest() {
+    const bars=activeCandles.filter(c=>Number.isFinite(c.closeTime)?c.closeTime<Date.now()-500:true);
+    if(bars.length<220){showToast('برای بک‌تست قابل ارزیابی حداقل ۲۲۰ کندل بسته‌شده لازم است.');return;}
+    const feePerSide=0.0006,slippagePerSide=0.0002,maxHold=40,warmup=100;
+    function evaluate(from,to) {
+      const trades=[];let signals=0,expired=0,i=Math.max(from,warmup);
+      while(i<to-1) {
+        const a=analyzeCandles(bars.slice(0,i+1));
+        if(a.direction==='NONE'){i++;continue;}
+        signals++;
+        const long=a.direction==='LONG',sign=long?1:-1,next=bars[i+1];
+        const entry=next.o*(long?1+slippagePerSide:1-slippagePerSide);
+        const stop=a.stop,risk=Math.abs(entry-stop);
+        if(!(risk>0 && (long?stop<entry:stop>entry))){i++;continue;}
+        const target=entry+sign*risk*a.rr;
+        let exitPrice=null,exitIndex=null,exitReason='TIME';
+        const lastIndex=Math.min(to-1,i+maxHold);
+        for(let j=i+1;j<=lastIndex;j++) {
+          const c=bars[j];
+          if(long && c.o<=stop){exitPrice=c.o*(1-slippagePerSide);exitReason='GAP_SL';exitIndex=j;break;}
+          if(long && c.o>=target){exitPrice=c.o*(1-slippagePerSide);exitReason='GAP_TP';exitIndex=j;break;}
+          if(!long && c.o>=stop){exitPrice=c.o*(1+slippagePerSide);exitReason='GAP_SL';exitIndex=j;break;}
+          if(!long && c.o<=target){exitPrice=c.o*(1+slippagePerSide);exitReason='GAP_TP';exitIndex=j;break;}
+          const stopHit=long?c.l<=stop:c.h>=stop;
+          const targetHit=long?c.h>=target:c.l<=target;
+          if(stopHit){exitPrice=stop*(long?1-slippagePerSide:1+slippagePerSide);exitReason='SL';exitIndex=j;break;}
+          if(targetHit){exitPrice=target*(long?1-slippagePerSide:1+slippagePerSide);exitReason='TP';exitIndex=j;break;}
+          if(j===lastIndex){exitPrice=c.c*(long?1-slippagePerSide:1+slippagePerSide);exitReason='TIME';exitIndex=j;}
+        }
+        if(exitPrice===null || exitIndex===null){expired++;i++;continue;}
+        const grossR=sign*(exitPrice-entry)/risk;
+        const feesR=((entry+exitPrice)*feePerSide)/risk;
+        const netR=grossR-feesR;
+        trades.push({netR,grossR,feesR,reason:exitReason,entryIndex:i+1,exitIndex});
+        i=Math.max(i+1,exitIndex+1);
+      }
+      const wins=trades.filter(t=>t.netR>0).length,losses=trades.length-wins;
+      const netR=trades.reduce((s,t)=>s+t.netR,0),grossProfit=trades.reduce((s,t)=>s+Math.max(0,t.netR),0),grossLoss=Math.abs(trades.reduce((s,t)=>s+Math.min(0,t.netR),0));
+      let equity=0,peak=0,maxDrawdown=0;
+      for(const t of trades){equity+=t.netR;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,peak-equity);}
+      return {signals,trades:trades.length,wins,losses,expired,netR,winRate:trades.length?wins/trades.length*100:0,
+        expectancy:trades.length?netR/trades.length:0,profitFactor:grossLoss>0?grossProfit/grossLoss:null,maxDrawdown};
+    }
+    const split=Math.floor(bars.length*.7);
+    const full=evaluate(warmup,bars.length),oos=evaluate(Math.max(warmup,split),bars.length),past=evaluate(warmup,split);
+    const panel=$('backtestResult')||document.createElement('div');panel.id='backtestResult';panel.className='panel';
+    panel.style.cssText='margin-top:12px;padding:14px;line-height:1.7';
+    const fmtPF=x=>x.profitFactor===null?'—':num(x.profitFactor,2);
+    const summary=(label,x)=>'<div style="margin-top:9px;padding:11px;background:#0a1725;border:1px solid #1d3046;border-radius:11px"><strong style="font-size:12px">'+label+'</strong><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px">'+
+      '<div><small style="color:#8da1b8">معامل سود (PF)</small><b style="display:block">'+fmtPF(x)+'</b></div>'+
+      '<div><small style="color:#8da1b8">بازده خالص</small><b style="display:block">'+num(x.netR,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">نرخ برد</small><b style="display:block">'+num(x.winRate,1)+'٪ · '+x.wins+'/'+x.trades+'</b></div>'+
+      '<div><small style="color:#8da1b8">امید ریاضی</small><b style="display:block">'+num(x.expectancy,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">حداکثر افت سرمایه</small><b style="display:block">'+num(x.maxDrawdown,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">سیگنال / معاملات بسته</small><b style="display:block">'+x.signals+' / '+x.trades+'</b></div></div></div>';
+    panel.innerHTML='<strong style="font-size:13px">گزارش بک‌تست ساختار بازار</strong><p style="font-size:10px;color:#8da1b8;margin:3px 0">'+bars.length+' کندل · ورود در بازشدن کندل بعدی · بدون هم‌پوشانی معاملات · حداکثر نگهداری '+maxHold+' کندل</p>'+
+      summary('۷۰٪ بخش گذشته · بررسی تاریخی',past)+summary('۳۰٪ خارج از نمونه · مهم‌تر برای ارزیابی',oos)+summary('کل داده',full)+
+      '<div style="margin-top:10px;padding:10px;border-right:2px solid #f5bd62;background:#171f2b;border-radius:8px;font-size:9px;color:#b5c3d2">هزینه فرضی هر سمت: کارمزد ۰٫۰۶٪ + اسلیپیج ۰٫۰۲٪. اگر حد ضرر و حد سود در یک کندل لمس شوند، حد ضرر اول فرض شده است. این گزارش شبیه‌سازی است، نه تضمین سود یا پیش‌بینی آینده.</div>'+
+      (oos.trades<10?'<p style="font-size:10px;color:#f5bd62;margin:8px 0 0">نمونه خارج از نمونه کمتر از ۱۰ معامله دارد؛ برای نتیجه‌گیری آماری کافی نیست و داده بیشتری لازم است.</p>':'');
+    const chart=$('backtestBtn').closest('.chart-panel');if(panel.parentElement!==chart)chart.appendChild(panel);
+    showToast('بک‌تست تمام شد؛ نتیجه خارج از نمونه را بررسی کن.');
+  }
+
+'''
+source = source[:bt_start] + new_backtest + source[bt_end:]
+js_path.write_text(source, encoding='utf-8')
+if html_path.exists():
+    html=html_path.read_text(encoding='utf-8')
+    html=html.replace('Confluence Engine','Market Structure Engine')
+    html=html.replace('هر نماد با ۵ خانواده استراتژی بررسی می‌شود. نبود ستاپ معتبر به معنی «بدون سیگنال» است.','هر نماد با ساختار بازار، جمع‌آوری نقدینگی، شکست BOS/CHoCH و بازآزمایی Order Block یا FVG بررسی می‌شود. در نبود ستاپ کامل، سیگنالی صادر نمی‌شود.')
+    html=html.replace('<span>EMA 20/50 Trend</span><span>MACD + RSI Momentum</span><span>Volume Breakout</span><span>Bollinger Reversion</span><span>Engulfing / Pin Bar</span><span>Market Structure</span><span>ATR Stop Loss</span><span>Risk / Reward Filter</span>', '<span>Market Structure · HH/HL & LH/LL</span><span>Liquidity Sweep</span><span>BOS / CHoCH Confirmation</span><span>Order Block Retest</span><span>Fair Value Gap (FVG)</span><span>ATR Structural Stop</span><span>Risk / Reward Filter</span><span>EMA / RSI · فقط اطلاعات کمکی</span>')
+    html_path.write_text(html, encoding='utf-8')
+print('Patched:', js_path)
+print('Updated HTML:', html_path.exists()) + '{r.analysis.confidence}%', 'تکمیل شروط 
+
+bt_start = source.index('  function runBacktest() {')
+bt_end = source.index('  function addCurrentSignalToJournal()', bt_start)
+new_backtest = r'''  function runBacktest() {
+    const bars=activeCandles.filter(c=>Number.isFinite(c.closeTime)?c.closeTime<Date.now()-500:true);
+    if(bars.length<220){showToast('برای بک‌تست قابل ارزیابی حداقل ۲۲۰ کندل بسته‌شده لازم است.');return;}
+    const feePerSide=0.0006,slippagePerSide=0.0002,maxHold=40,warmup=100;
+    function evaluate(from,to) {
+      const trades=[];let signals=0,expired=0,i=Math.max(from,warmup);
+      while(i<to-1) {
+        const a=analyzeCandles(bars.slice(0,i+1));
+        if(a.direction==='NONE'){i++;continue;}
+        signals++;
+        const long=a.direction==='LONG',sign=long?1:-1,next=bars[i+1];
+        const entry=next.o*(long?1+slippagePerSide:1-slippagePerSide);
+        const stop=a.stop,risk=Math.abs(entry-stop);
+        if(!(risk>0 && (long?stop<entry:stop>entry))){i++;continue;}
+        const target=entry+sign*risk*a.rr;
+        let exitPrice=null,exitIndex=null,exitReason='TIME';
+        const lastIndex=Math.min(to-1,i+maxHold);
+        for(let j=i+1;j<=lastIndex;j++) {
+          const c=bars[j];
+          if(long && c.o<=stop){exitPrice=c.o*(1-slippagePerSide);exitReason='GAP_SL';exitIndex=j;break;}
+          if(long && c.o>=target){exitPrice=c.o*(1-slippagePerSide);exitReason='GAP_TP';exitIndex=j;break;}
+          if(!long && c.o>=stop){exitPrice=c.o*(1+slippagePerSide);exitReason='GAP_SL';exitIndex=j;break;}
+          if(!long && c.o<=target){exitPrice=c.o*(1+slippagePerSide);exitReason='GAP_TP';exitIndex=j;break;}
+          const stopHit=long?c.l<=stop:c.h>=stop;
+          const targetHit=long?c.h>=target:c.l<=target;
+          if(stopHit){exitPrice=stop*(long?1-slippagePerSide:1+slippagePerSide);exitReason='SL';exitIndex=j;break;}
+          if(targetHit){exitPrice=target*(long?1-slippagePerSide:1+slippagePerSide);exitReason='TP';exitIndex=j;break;}
+          if(j===lastIndex){exitPrice=c.c*(long?1-slippagePerSide:1+slippagePerSide);exitReason='TIME';exitIndex=j;}
+        }
+        if(exitPrice===null || exitIndex===null){expired++;i++;continue;}
+        const grossR=sign*(exitPrice-entry)/risk;
+        const feesR=((entry+exitPrice)*feePerSide)/risk;
+        const netR=grossR-feesR;
+        trades.push({netR,grossR,feesR,reason:exitReason,entryIndex:i+1,exitIndex});
+        i=Math.max(i+1,exitIndex+1);
+      }
+      const wins=trades.filter(t=>t.netR>0).length,losses=trades.length-wins;
+      const netR=trades.reduce((s,t)=>s+t.netR,0),grossProfit=trades.reduce((s,t)=>s+Math.max(0,t.netR),0),grossLoss=Math.abs(trades.reduce((s,t)=>s+Math.min(0,t.netR),0));
+      let equity=0,peak=0,maxDrawdown=0;
+      for(const t of trades){equity+=t.netR;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,peak-equity);}
+      return {signals,trades:trades.length,wins,losses,expired,netR,winRate:trades.length?wins/trades.length*100:0,
+        expectancy:trades.length?netR/trades.length:0,profitFactor:grossLoss>0?grossProfit/grossLoss:null,maxDrawdown};
+    }
+    const split=Math.floor(bars.length*.7);
+    const full=evaluate(warmup,bars.length),oos=evaluate(Math.max(warmup,split),bars.length),past=evaluate(warmup,split);
+    const panel=$('backtestResult')||document.createElement('div');panel.id='backtestResult';panel.className='panel';
+    panel.style.cssText='margin-top:12px;padding:14px;line-height:1.7';
+    const fmtPF=x=>x.profitFactor===null?'—':num(x.profitFactor,2);
+    const summary=(label,x)=>'<div style="margin-top:9px;padding:11px;background:#0a1725;border:1px solid #1d3046;border-radius:11px"><strong style="font-size:12px">'+label+'</strong><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px">'+
+      '<div><small style="color:#8da1b8">معامل سود (PF)</small><b style="display:block">'+fmtPF(x)+'</b></div>'+
+      '<div><small style="color:#8da1b8">بازده خالص</small><b style="display:block">'+num(x.netR,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">نرخ برد</small><b style="display:block">'+num(x.winRate,1)+'٪ · '+x.wins+'/'+x.trades+'</b></div>'+
+      '<div><small style="color:#8da1b8">امید ریاضی</small><b style="display:block">'+num(x.expectancy,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">حداکثر افت سرمایه</small><b style="display:block">'+num(x.maxDrawdown,2)+'R</b></div>'+
+      '<div><small style="color:#8da1b8">سیگنال / معاملات بسته</small><b style="display:block">'+x.signals+' / '+x.trades+'</b></div></div></div>';
+    panel.innerHTML='<strong style="font-size:13px">گزارش بک‌تست ساختار بازار</strong><p style="font-size:10px;color:#8da1b8;margin:3px 0">'+bars.length+' کندل · ورود در بازشدن کندل بعدی · بدون هم‌پوشانی معاملات · حداکثر نگهداری '+maxHold+' کندل</p>'+
+      summary('۷۰٪ بخش گذشته · بررسی تاریخی',past)+summary('۳۰٪ خارج از نمونه · مهم‌تر برای ارزیابی',oos)+summary('کل داده',full)+
+      '<div style="margin-top:10px;padding:10px;border-right:2px solid #f5bd62;background:#171f2b;border-radius:8px;font-size:9px;color:#b5c3d2">هزینه فرضی هر سمت: کارمزد ۰٫۰۶٪ + اسلیپیج ۰٫۰۲٪. اگر حد ضرر و حد سود در یک کندل لمس شوند، حد ضرر اول فرض شده است. این گزارش شبیه‌سازی است، نه تضمین سود یا پیش‌بینی آینده.</div>'+
+      (oos.trades<10?'<p style="font-size:10px;color:#f5bd62;margin:8px 0 0">نمونه خارج از نمونه کمتر از ۱۰ معامله دارد؛ برای نتیجه‌گیری آماری کافی نیست و داده بیشتری لازم است.</p>':'');
+    const chart=$('backtestBtn').closest('.chart-panel');if(panel.parentElement!==chart)chart.appendChild(panel);
+    showToast('بک‌تست تمام شد؛ نتیجه خارج از نمونه را بررسی کن.');
+  }
+
+'''
+source = source[:bt_start] + new_backtest + source[bt_end:]
+js_path.write_text(source, encoding='utf-8')
+if html_path.exists():
+    html=html_path.read_text(encoding='utf-8')
+    html=html.replace('Confluence Engine','Market Structure Engine')
+    html=html.replace('هر نماد با ۵ خانواده استراتژی بررسی می‌شود. نبود ستاپ معتبر به معنی «بدون سیگنال» است.','هر نماد با ساختار بازار، جمع‌آوری نقدینگی، شکست BOS/CHoCH و بازآزمایی Order Block یا FVG بررسی می‌شود. در نبود ستاپ کامل، سیگنالی صادر نمی‌شود.')
+    html=html.replace('<span>EMA 20/50 Trend</span><span>MACD + RSI Momentum</span><span>Volume Breakout</span><span>Bollinger Reversion</span><span>Engulfing / Pin Bar</span><span>Market Structure</span><span>ATR Stop Loss</span><span>Risk / Reward Filter</span>', '<span>Market Structure · HH/HL & LH/LL</span><span>Liquidity Sweep</span><span>BOS / CHoCH Confirmation</span><span>Order Block Retest</span><span>Fair Value Gap (FVG)</span><span>ATR Structural Stop</span><span>Risk / Reward Filter</span><span>EMA / RSI · فقط اطلاعات کمکی</span>')
+    html_path.write_text(html, encoding='utf-8')
+print('Patched:', js_path)
+print('Updated HTML:', html_path.exists()) + '{r.analysis.direction===\'NONE\'?0:r.analysis.setups.length}/4')
 
 bt_start = source.index('  function runBacktest() {')
 bt_end = source.index('  function addCurrentSignalToJournal()', bt_start)
