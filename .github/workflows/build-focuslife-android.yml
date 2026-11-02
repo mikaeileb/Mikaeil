@@ -1,0 +1,42 @@
+name: Build FocusLife Android APK
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'focuslife/**'
+      - '.github/workflows/build-focuslife-android.yml'
+  pull_request:
+    paths:
+      - 'focuslife/**'
+      - '.github/workflows/build-focuslife-android.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Restore offline app interface
+        run: |
+          mkdir -p focuslife/app/src/main/assets
+          base64 -d focuslife/index.html.gz.b64 | gzip -dc > focuslife/app/src/main/assets/index.html
+      - name: Build debug APK
+        working-directory: focuslife
+        run: gradle --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FocusLife-Android-APK
+          path: focuslife/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
