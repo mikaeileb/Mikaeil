@@ -79,4 +79,41 @@ css_path.write_text(css,encoding="utf-8")
 mp=js_path.with_name("manifest.webmanifest")
 if mp.exists():
     m=json.loads(mp.read_text(encoding="utf-8"));m["icons"]=[{"src":"brand-logo.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}];mp.write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding="utf-8")
+
+# Refine checklist wording, avoid look-ahead in historical backtests, and discover live tradable symbols.
+js=js.replace('تکمیل شروط '+chr(36)+'{a.setups.length}/4','کیفیت همگرایی '+chr(36)+'{a.confidence}%')
+js=js.replace("x.direction==='LONG'?'صعودی': 'نزولی'","x.passed?'تأیید شد':'نیازمند تأیید'")
+js=js.replace('const CRYPTO = [','let CRYPTO = [',1)
+crypto_anchor="  function parseBinanceCandle(k) {"
+dynamic=r'''
+  async function refreshCryptoUniverse(){
+    if(settings.market==='forex')return;
+    const previous=settings.symbol;
+    try{
+      const [info,tickers]=await Promise.all([cryptoGet('exchangeInfo'),cryptoGet('ticker/24hr')]);
+      const valid=new Set((info.symbols||[]).filter(x=>x.status==='TRADING'&&x.quoteAsset==='USDT'&&(settings.market!=='futures'||x.contractType==='PERPETUAL')).map(x=>x.symbol));
+      const ranked=(tickers||[]).filter(x=>valid.has(x.symbol)).sort((a,b)=>(Number(b.quoteVolume)||0)-(Number(a.quoteVolume)||0)).slice(0,100);
+      if(ranked.length>=20){
+        CRYPTO=ranked.map(x=>[x.symbol,x.symbol.replace(/USDT$/,'/USDT')]);
+        updateSymbolOptions();
+        if(previous!==settings.symbol)loadActive(false);
+      }
+    }catch(e){console.warn('Dynamic crypto list unavailable; using curated list.',e);}
+  }
+'''
+if crypto_anchor not in js: raise SystemExit("dynamic crypto anchor missing")
+js=js.replace(crypto_anchor,dynamic+"\n"+crypto_anchor,1)
+js=js.replace("    updateSymbolOptions();$('marketSelect').value=settings.market;$('timeframeSelect').value=settings.timeframe;","    updateSymbolOptions();$('marketSelect').value=settings.market;$('timeframeSelect').value=settings.timeframe;")
+js=js.replace("    syncRiskInputs();bindEvents();renderJournal();loadActive(false);","    syncRiskInputs();bindEvents();renderJournal();loadActive(false);refreshCryptoUniverse();")
+js=js.replace("settings.symbol=activeList()[0][0];persistSettings();updateSymbolOptions();loadActive();","settings.symbol=activeList()[0][0];persistSettings();updateSymbolOptions();loadActive();refreshCryptoUniverse();")
+# Prevent current multi-timeframe snapshot from leaking into historical candles.
+bt=js.index("  function runBacktest() {")
+bars=js.index("    const bars=",bt)
+js=js[:bars]+"    const savedHigherTimeframeBias=higherTimeframeBias;higherTimeframeBias=null;\n"+js[bars:]
+eval_line="    const full=evaluate(warmup,bars.length),oos=evaluate(Math.max(warmup,split),bars.length),past=evaluate(warmup,split);"
+js=js.replace(eval_line,eval_line+"\n    higherTimeframeBias=savedHigherTimeframeBias;",1)
+js_path.write_text(js,encoding="utf-8")
+html=html.replace('<option value="65">همه نمادها</option>','<option value="100">۱۰۰ نماد برتر</option>')
+html_path.write_text(html,encoding="utf-8")
+
 print("Professional TradePilot complete:",len(coins),"coins")
