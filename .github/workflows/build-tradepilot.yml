@@ -6,6 +6,7 @@ on:
       - 'TradePilot-Android-Project-v2.zip'
       - '.github/workflows/build-tradepilot.yml'
       - '.github/scripts/patch_tradepilot.py'
+      - '.github/scripts/professionalize_tradepilot.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,6 +22,7 @@ jobs:
       - name: Upgrade analysis engine and backtester
         run: |
           python3 .github/scripts/patch_tradepilot.py TradePilot
+          python3 .github/scripts/professionalize_tradepilot.py
           APP_JS=$(find TradePilot -type f -name app.js -print -quit)
           node --check "$APP_JS"
       - uses: actions/setup-node@v4
@@ -40,6 +42,28 @@ jobs:
           npm install --no-audit --no-fund
           npx cap add android
           npx cap sync android
+      - name: Apply TradePilot launcher branding
+        run: |
+          python3 -m pip install --quiet cairosvg
+          python3 - <<'PY'
+          from pathlib import Path
+          import cairosvg
+          root=Path('TradePilot/android/app/src/main/res')
+          svg='TradePilot/public/brand-logo.svg'
+          sizes={'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          for folder,size in sizes.items():
+            target=root/folder
+            target.mkdir(parents=True,exist_ok=True)
+            for name in ('ic_launcher.png','ic_launcher_round.png','ic_launcher_foreground.png'):
+              cairosvg.svg2png(url=svg,write_to=str(target/name),output_width=size,output_height=size)
+          values=root/'values'/'strings.xml'
+          if values.exists():
+            s=values.read_text()
+            import re
+            s=re.sub(r'<string name="app_name">.*?</string>','<string name="app_name">TradePilot</string>',s)
+            values.write_text(s)
+          print('Launcher icon and app label updated')
+          PY
       - name: Build APK
         working-directory: TradePilot/android
         run: |
