@@ -1,0 +1,59 @@
+name: Build Start Fresh Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'StartFresh/**'
+      - '.github/workflows/build-start-fresh.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile, test and package APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Check project files
+        run: |
+          test -f StartFresh/settings.gradle.kts
+          test -f StartFresh/app/src/main/AndroidManifest.xml
+          test -f StartFresh/app/src/main/java/com/mikaeil/startfresh/MainActivity.kt
+
+      - name: Compile and run unit tests
+        run: gradle -p StartFresh :app:testDebugUnitTest :app:assembleDebug --no-daemon
+
+      - name: Verify APK exists
+        run: |
+          test -s StartFresh/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh StartFresh/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: StartFresh-Android-APK
+          path: StartFresh/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
