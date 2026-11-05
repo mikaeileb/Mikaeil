@@ -293,6 +293,18 @@ private fun overallStreak(logs: List<HabitLog>, today: String): Int {
 }
 
 @Composable
+private fun MissionRow(title: String, done: Boolean) {
+    SoftCard {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (done) "✅" else "◯", fontSize = 19.sp)
+            Spacer(Modifier.width(10.dp))
+            Text(title, Modifier.weight(1f), fontSize = 13.sp)
+            Text(if (done) "انجام شد" else "در انتظار", fontSize = 11.sp, color = if (done) Teal else Muted)
+        }
+    }
+}
+
+@Composable
 private fun MetricTile(title: String, value: String, detail: String, emoji: String, modifier: Modifier = Modifier) {
     SoftCard(modifier = modifier) {
         Text(emoji, fontSize = 22.sp)
@@ -352,7 +364,7 @@ private fun HomeScreen(
                 Text(JalaliDate.number(overall) + "٪", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
             ProgressLine(overall / 100f)
-            Text("روزهای پیوسته با عادت‌ها: " + JalaliDate.number(overallStreak(habitLogs, today)), color = Muted, fontSize = 12.sp)
+            Text("روزهای متوالی با ثبت عادت: " + JalaliDate.number(overallStreak(habitLogs, today)), color = Muted, fontSize = 12.sp)
         }
         SectionTitle("خلاصه امروز")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -363,6 +375,10 @@ private fun HomeScreen(
             MetricTile("عادت‌ها", JalaliDate.number(completedToday) + "/" + JalaliDate.number(todayHabits), "تکمیل‌شده امروز", "🌿", Modifier.weight(1f))
             MetricTile("پس‌انداز", toman(totalSaved), if (totalTarget > 0) "از " + toman(totalTarget) else "هدف مالی تعیین نشده", "💰", Modifier.weight(1f))
         }
+        SectionTitle("ماموریت‌های امروز")
+        MissionRow("۳۰ دقیقه مطالعه", todayMinutes >= 30)
+        MissionRow("۱۰ صفحه کتاب‌خوانی", pagesToday >= 10)
+        MissionRow("ثبت حداقل یک عادت", completedToday > 0)
         SectionTitle("شروع سریع")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ActionButton("شروع مطالعه", onStudy, Modifier.weight(1f))
@@ -657,7 +673,13 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
             scope.launch {
                 val next = (book.pagesRead + pages).coerceAtMost(book.totalPages)
                 dao.updateBook(book.copy(pagesRead = next, status = if (next >= book.totalPages) "DONE" else "READING"))
-                dao.insertBookLog(BookLog(bookId = book.id, date = JalaliDate.todayKey(), pages = pages, note = note))
+                val day = JalaliDate.todayKey()
+                val previous = dao.findBookLog(book.id, day)
+                if (previous == null) {
+                    dao.insertBookLog(BookLog(bookId = book.id, date = day, pages = pages, note = note))
+                } else {
+                    dao.insertBookLog(previous.copy(pages = previous.pages + pages, note = note.ifBlank { previous.note }))
+                }
             }
             selectedBook = null
         }
