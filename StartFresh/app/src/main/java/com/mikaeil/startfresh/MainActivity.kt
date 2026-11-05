@@ -60,7 +60,8 @@ enum class Page(val title: String, val icon: String) {
     REPORTS("گزارش‌ها", "▥"),
     JOURNAL("دفتر روزانه", "☷"),
     AWARDS("دستاوردها", "✧"),
-    SETTINGS("تنظیمات", "⚙")
+    SETTINGS("تنظیمات", "⚙"),
+    SEARCH("جست‌وجو", "⌕")
 }
 
 class MainActivity : ComponentActivity() {
@@ -136,7 +137,7 @@ private fun StartFreshApp(
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     listOf(Page.HOME, Page.STUDY, Page.HABITS, Page.BOOKS, Page.MORE).forEach { item ->
                         NavigationBarItem(
-                            selected = page == item || (page in listOf(Page.SAVINGS, Page.CALENDAR, Page.REPORTS, Page.JOURNAL, Page.AWARDS, Page.SETTINGS) && item == Page.MORE),
+                            selected = page == item || (page in listOf(Page.SAVINGS, Page.CALENDAR, Page.REPORTS, Page.JOURNAL, Page.AWARDS, Page.SETTINGS, Page.SEARCH) && item == Page.MORE),
                             onClick = { page = item },
                             icon = { Text(item.icon, fontSize = 19.sp) },
                             label = { Text(item.title, fontSize = 11.sp) },
@@ -159,10 +160,11 @@ private fun StartFreshApp(
                     Page.BOOKS -> BooksScreen(dao, books, bookLogs)
                     Page.HABITS -> HabitsScreen(dao, habits, habitLogs)
                     Page.SAVINGS -> SavingsScreen(dao, goals, moneyEntries)
-                    Page.CALENDAR -> CalendarScreen(sessions, books, bookLogs, habits, habitLogs, goals, journals)
+                    Page.CALENDAR -> CalendarScreen(sessions, books, bookLogs, habits, habitLogs, moneyEntries, journals)
                     Page.REPORTS -> ReportsScreen(sessions, moneyEntries, bookLogs, habitLogs)
                     Page.JOURNAL -> JournalScreen(dao, journals)
                     Page.AWARDS -> AwardsScreen(sessions, bookLogs, habitLogs, books, goals)
+                    Page.SEARCH -> SearchScreen(sessions, books, habits, moneyEntries, journals)
                     Page.SETTINGS -> SettingsScreen(
                         dao, subjects, sessions, books, bookLogs, habits, habitLogs,
                         goals, moneyEntries, journals, darkTheme, onDarkThemeChange
@@ -871,14 +873,15 @@ private fun CalendarScreen(
     bookLogs: List<BookLog>,
     habits: List<Habit>,
     habitLogs: List<HabitLog>,
-    goals: List<SavingGoal>,
+    moneyEntries: List<MoneyEntry>,
     journals: List<DailyJournal>
 ) {
     var selectedDate by rememberSaveable { mutableStateOf(JalaliDate.todayKey()) }
     val daySessions = sessions.filter { it.date == selectedDate }
     val dayPages = bookLogs.filter { it.date == selectedDate }.sumOf { it.pages }
     val dayHabits = habitLogs.filter { it.date == selectedDate && it.completed }
-    val daySaving = goals.sumOf { goal -> goal.savedAmount }
+    val daySaving = moneyEntries.filter { it.date == selectedDate && it.category == "پس‌انداز" }.sumOf { it.amount } -
+        moneyEntries.filter { it.date == selectedDate && it.category == "برداشت پس‌انداز" }.sumOf { it.amount }
     val journal = journals.firstOrNull { it.date == selectedDate }
     ScreenColumn {
         ScreenHeader("تقویم پیشرفت", "روزهایت را با مهربانی مرور کن")
@@ -904,7 +907,7 @@ private fun CalendarScreen(
             Text("دفتر روزانه", fontWeight = FontWeight.Bold)
             Text(journal?.highlight?.ifBlank { "بدون یادداشت" } ?: "یادداشتی برای این روز ثبت نشده", color = Muted, fontSize = 13.sp)
         }
-        Text("مجموع پس‌انداز فعلی: " + toman(daySaving), color = Muted, fontSize = 12.sp)
+        Text("خالص واریزی پس‌انداز در این روز: " + toman(daySaving.coerceAtLeast(0)), color = Muted, fontSize = 12.sp)
     }
 }
 
@@ -1088,7 +1091,8 @@ private fun MoreScreen(onNavigate: (Page) -> Unit) {
             Triple(Page.REPORTS, "نمودارها و گزارش‌ها", "📊"),
             Triple(Page.JOURNAL, "دفتر روزانه من", "📝"),
             Triple(Page.AWARDS, "امتیازها و دستاوردها", "🏅"),
-            Triple(Page.SETTINGS, "تنظیمات و پشتیبان‌گیری", "⚙️")
+            Triple(Page.SETTINGS, "تنظیمات و پشتیبان‌گیری", "⚙️"),
+            Triple(Page.SEARCH, "جست‌وجوی اطلاعات ثبت‌شده", "🔎")
         ).forEach { item ->
             SoftCard(Modifier.clickable { onNavigate(item.first) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1097,6 +1101,47 @@ private fun MoreScreen(onNavigate: (Page) -> Unit) {
                     Column(Modifier.weight(1f)) { Text(item.second, fontWeight = FontWeight.Bold) }
                     Text("‹", color = Muted, fontSize = 22.sp)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchScreen(
+    sessions: List<StudySession>,
+    books: List<Book>,
+    habits: List<Habit>,
+    entries: List<MoneyEntry>,
+    journals: List<DailyJournal>
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val q = query.trim()
+    val results = buildList {
+        sessions.filter { q.isNotBlank() && (it.subjectName.contains(q, true) || it.note.contains(q, true)) }
+            .forEach { add("مطالعه · " + it.subjectName + " · " + JalaliDate.short(it.date) + " · " + JalaliDate.number(it.minutes) + " دقیقه") }
+        books.filter { q.isNotBlank() && (it.title.contains(q, true) || it.author.contains(q, true) || it.category.contains(q, true)) }
+            .forEach { add("کتاب · " + it.title + " · " + it.author) }
+        habits.filter { q.isNotBlank() && it.name.contains(q, true) }
+            .forEach { add("عادت · " + it.name) }
+        entries.filter { q.isNotBlank() && (it.title.contains(q, true) || it.category.contains(q, true)) }
+            .forEach { add("تراکنش · " + it.title + " · " + toman(it.amount)) }
+        journals.filter { q.isNotBlank() && (it.highlight.contains(q, true) || it.note.contains(q, true) || it.improvement.contains(q, true)) }
+            .forEach { add("دفتر روزانه · " + JalaliDate.short(it.date) + " · " + it.highlight) }
+    }
+    ScreenColumn {
+        ScreenHeader("جست‌وجو", "در داده‌های ذخیره‌شده خودت")
+        OutlinedTextField(
+            query, { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("نام کتاب، درس، عادت یا عبارت…") },
+            singleLine = true
+        )
+        if (q.isBlank()) EmptyHint("برای شروع، یک واژه وارد کن.")
+        else if (results.isEmpty()) EmptyHint("نتیجه‌ای پیدا نشد.")
+        else {
+            SectionTitle("نتایج", JalaliDate.number(results.size) + " مورد")
+            results.forEach { result ->
+                SoftCard { Text(result, fontSize = 13.sp) }
             }
         }
     }
