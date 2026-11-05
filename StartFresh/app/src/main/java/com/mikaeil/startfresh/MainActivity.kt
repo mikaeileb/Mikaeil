@@ -551,42 +551,6 @@ private fun StudyTargetDialog(current: Int, onDismiss: () -> Unit, onSave: (Int)
 
 @Composable
 private fun StudyEntryDialog(
-                }
-            }
-            ProgressLine(percent(todayMinutes, 120))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle("جلسه‌های اخیر")
-            ActionButton("ثبت دستی", { showManual = true })
-        }
-        if (sessions.isEmpty()) EmptyHint("هنوز جلسه‌ای ثبت نشده. اولین جلسه‌ات را شروع کن.")
-        sessions.take(20).forEach { session ->
-            SoftCard {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(session.subjectName, fontWeight = FontWeight.Bold)
-                    Text(JalaliDate.number(session.minutes) + " دقیقه", color = MaterialTheme.colorScheme.primary)
-                }
-                Text(JalaliDate.format(session.date), color = Muted, fontSize = 11.sp)
-                if (session.note.isNotBlank()) Text(session.note, fontSize = 12.sp)
-                TextButton(onClick = { scope.launch { dao.deleteSession(session.id) } }) { Text("حذف جلسه", color = Color(0xFFCC5A56)) }
-            }
-        }
-    }
-
-    if (showManual) {
-        StudyEntryDialog(subjects, onDismiss = { showManual = false }) { name, minutes, note ->
-            scope.launch {
-                val existing = subjects.firstOrNull { it.name.equals(name, true) }
-                val id = existing?.id ?: dao.insertSubject(StudySubject(name = name))
-                dao.insertSession(StudySession(subjectId = id, subjectName = name, date = today, minutes = minutes, note = note))
-            }
-            showManual = false
-        }
-    }
-}
-
-@Composable
-private fun StudyEntryDialog(
     subjects: List<StudySubject>,
     onDismiss: () -> Unit,
     onSave: (String, Int, String) -> Unit
