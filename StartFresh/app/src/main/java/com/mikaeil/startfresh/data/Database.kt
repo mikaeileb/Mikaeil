@@ -139,6 +139,7 @@ interface StartFreshDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertBook(value: Book): Long
     @Update suspend fun updateBook(value: Book)
     @Query("DELETE FROM books WHERE id = :id") suspend fun deleteBook(id: Long)
+    @Query("DELETE FROM book_logs WHERE bookId = :bookId") suspend fun deleteBookLogsForBook(bookId: Long)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertBookLog(value: BookLog): Long
     @Query("SELECT * FROM book_logs WHERE bookId = :bookId AND date = :date LIMIT 1") suspend fun findBookLog(bookId: Long, date: String): BookLog?
 
@@ -146,6 +147,7 @@ interface StartFreshDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertHabitLog(value: HabitLog): Long
     @Query("SELECT * FROM habit_logs WHERE habitId = :habitId AND date = :date LIMIT 1") suspend fun findHabitLog(habitId: Long, date: String): HabitLog?
     @Query("DELETE FROM habits WHERE id = :id") suspend fun deleteHabit(id: Long)
+    @Query("DELETE FROM habit_logs WHERE habitId = :habitId") suspend fun deleteHabitLogsForHabit(habitId: Long)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertSavingGoal(value: SavingGoal): Long
     @Update suspend fun updateSavingGoal(value: SavingGoal)
