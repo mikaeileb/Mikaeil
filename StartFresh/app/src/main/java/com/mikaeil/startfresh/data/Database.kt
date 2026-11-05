@@ -45,7 +45,7 @@ data class Book(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "book_logs")
+@Entity(tableName = "book_logs", indices = [Index(value = ["bookId", "date"], unique = true)])
 data class BookLog(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val bookId: Long,
@@ -140,6 +140,7 @@ interface StartFreshDao {
     @Update suspend fun updateBook(value: Book)
     @Query("DELETE FROM books WHERE id = :id") suspend fun deleteBook(id: Long)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertBookLog(value: BookLog): Long
+    @Query("SELECT * FROM book_logs WHERE bookId = :bookId AND date = :date LIMIT 1") suspend fun findBookLog(bookId: Long, date: String): BookLog?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertHabit(value: Habit): Long
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertHabitLog(value: HabitLog): Long
