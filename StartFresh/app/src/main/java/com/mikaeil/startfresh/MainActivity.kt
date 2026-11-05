@@ -1,0 +1,1184 @@
+package com.mikaeil.startfresh
+
+import android.Manifest
+import android.app.TimePickerDialog
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.google.gson.Gson
+import com.mikaeil.startfresh.data.*
+import com.mikaeil.startfresh.notifications.ReminderScheduler
+import com.mikaeil.startfresh.util.JalaliDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+
+private val Navy = Color(0xFF102A43)
+private val Teal = Color(0xFF00A995)
+private val Gold = Color(0xFFFFC857)
+private val Muted = Color(0xFF718096)
+
+enum class Page(val title: String, val icon: String) {
+    HOME("خانه", "⌂"),
+    STUDY("مطالعه", "✎"),
+    HABITS("عادت‌ها", "✓"),
+    BOOKS("کتابخانه", "▤"),
+    MORE("بیشتر", "•••"),
+    SAVINGS("پس‌انداز", "◈"),
+    CALENDAR("تقویم", "▦"),
+    REPORTS("گزارش‌ها", "▥"),
+    JOURNAL("دفتر روزانه", "☷"),
+    AWARDS("دستاوردها", "✧"),
+    SETTINGS("تنظیمات", "⚙")
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val database = StartFreshDatabase.get(applicationContext)
+        val preferences = getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE)
+        val dark = preferences.getBoolean("dark_theme", false)
+        setContent {
+            var darkTheme by rememberSaveable { mutableStateOf(dark) }
+            StartFreshTheme(darkTheme) {
+                StartFreshApp(
+                    database = database,
+                    darkTheme = darkTheme,
+                    onDarkThemeChange = {
+                        darkTheme = it
+                        preferences.edit().putBoolean("dark_theme", it).apply()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StartFreshTheme(dark: Boolean, content: @Composable () -> Unit) {
+    val scheme = if (dark) {
+        darkColorScheme(
+            primary = Color(0xFF53D8C5),
+            secondary = Gold,
+            background = Color(0xFF0D1B2A),
+            surface = Color(0xFF14283B),
+            onPrimary = Navy,
+            onBackground = Color(0xFFEAF2F8),
+            onSurface = Color(0xFFEAF2F8)
+        )
+    } else {
+        lightColorScheme(
+            primary = Teal,
+            secondary = Gold,
+            background = Color(0xFFF4F8FA),
+            surface = Color.White,
+            onPrimary = Color.White,
+            onBackground = Navy,
+            onSurface = Navy
+        )
+    }
+    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+}
+
+@Composable
+private fun StartFreshApp(
+    database: StartFreshDatabase,
+    darkTheme: Boolean,
+    onDarkThemeChange: (Boolean) -> Unit
+) {
+    val dao = remember(database) { database.dao() }
+    val subjects by remember(dao) { dao.observeSubjects() }.collectAsState(initial = emptyList())
+    val sessions by remember(dao) { dao.observeSessions() }.collectAsState(initial = emptyList())
+    val books by remember(dao) { dao.observeBooks() }.collectAsState(initial = emptyList())
+    val bookLogs by remember(dao) { dao.observeBookLogs() }.collectAsState(initial = emptyList())
+    val habits by remember(dao) { dao.observeHabits() }.collectAsState(initial = emptyList())
+    val habitLogs by remember(dao) { dao.observeHabitLogs() }.collectAsState(initial = emptyList())
+    val goals by remember(dao) { dao.observeSavingGoals() }.collectAsState(initial = emptyList())
+    val moneyEntries by remember(dao) { dao.observeMoneyEntries() }.collectAsState(initial = emptyList())
+    val journals by remember(dao) { dao.observeJournals() }.collectAsState(initial = emptyList())
+    var page by rememberSaveable { mutableStateOf(Page.HOME) }
+
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            bottomBar = {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    listOf(Page.HOME, Page.STUDY, Page.HABITS, Page.BOOKS, Page.MORE).forEach { item ->
+                        NavigationBarItem(
+                            selected = page == item || (page in listOf(Page.SAVINGS, Page.CALENDAR, Page.REPORTS, Page.JOURNAL, Page.AWARDS, Page.SETTINGS) && item == Page.MORE),
+                            onClick = { page = item },
+                            icon = { Text(item.icon, fontSize = 19.sp) },
+                            label = { Text(item.title, fontSize = 11.sp) },
+                            alwaysShowLabel = true
+                        )
+                    }
+                }
+            }
+        ) { insets ->
+            Box(Modifier.fillMaxSize().padding(insets)) {
+                when (page) {
+                    Page.HOME -> HomeScreen(
+                        sessions, books, bookLogs, habits, habitLogs, goals,
+                        onStudy = { page = Page.STUDY },
+                        onBooks = { page = Page.BOOKS },
+                        onHabits = { page = Page.HABITS },
+                        onSavings = { page = Page.SAVINGS }
+                    )
+                    Page.STUDY -> StudyScreen(dao, subjects, sessions)
+                    Page.BOOKS -> BooksScreen(dao, books, bookLogs)
+                    Page.HABITS -> HabitsScreen(dao, habits, habitLogs)
+                    Page.SAVINGS -> SavingsScreen(dao, goals, moneyEntries)
+                    Page.CALENDAR -> CalendarScreen(sessions, books, bookLogs, habits, habitLogs, goals, journals)
+                    Page.REPORTS -> ReportsScreen(sessions, moneyEntries, bookLogs, habitLogs)
+                    Page.JOURNAL -> JournalScreen(dao, journals)
+                    Page.AWARDS -> AwardsScreen(sessions, bookLogs, habitLogs, books, goals)
+                    Page.SETTINGS -> SettingsScreen(
+                        dao, subjects, sessions, books, bookLogs, habits, habitLogs,
+                        goals, moneyEntries, journals, darkTheme, onDarkThemeChange
+                    )
+                    Page.MORE -> MoreScreen { page = it }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScreenColumn(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun ScreenHeader(title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, fontSize = 23.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+        Text(subtitle, fontSize = 13.sp, color = Muted)
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, trailing: String = "") {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        if (trailing.isNotBlank()) Text(trailing, color = Muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun SoftCard(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.surface,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = color),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+    }
+}
+
+@Composable
+private fun ProgressLine(value: Float, color: Color = Teal) {
+    Box(
+        Modifier.fillMaxWidth().height(9.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+    ) {
+        Box(
+            Modifier.fillMaxWidth(value.coerceIn(0f, 1f)).fillMaxHeight().background(color, CircleShape)
+        )
+    }
+}
+
+@Composable
+private fun EmptyHint(text: String) {
+    Text(text, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
+}
+
+@Composable
+private fun ActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 11.dp)
+    ) { Text(text, fontWeight = FontWeight.SemiBold) }
+}
+
+@Composable
+private fun OutlineButton(text: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, shape = RoundedCornerShape(14.dp)) { Text(text) }
+}
+
+private fun percent(value: Int, total: Int): Float =
+    if (total <= 0) 0f else (value.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+
+private fun toman(value: Long): String =
+    JalaliDate.toPersianDigits(String.format("%,d", value)) + " تومان"
+
+private fun streakForHabit(habitId: Long, logs: List<HabitLog>, today: String): Int {
+    val dates = logs.filter { it.habitId == habitId && it.completed }.map { it.date }.toSet()
+    var cursor = if (today in dates) today else JalaliDate.shift(today, -1)
+    var count = 0
+    while (cursor in dates && count < 400) {
+        count++
+        cursor = JalaliDate.shift(cursor, -1)
+    }
+    return count
+}
+
+private fun overallStreak(logs: List<HabitLog>, today: String): Int {
+    val dates = logs.filter { it.completed }.map { it.date }.toSet()
+    var cursor = if (today in dates) today else JalaliDate.shift(today, -1)
+    var count = 0
+    while (cursor in dates && count < 400) {
+        count++
+        cursor = JalaliDate.shift(cursor, -1)
+    }
+    return count
+}
+
+@Composable
+private fun MetricTile(title: String, value: String, detail: String, emoji: String, modifier: Modifier = Modifier) {
+    SoftCard(modifier = modifier) {
+        Text(emoji, fontSize = 22.sp)
+        Text(value, fontWeight = FontWeight.Bold, fontSize = 19.sp)
+        Text(title, fontSize = 12.sp, color = Muted)
+        Text(detail, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable
+private fun HomeScreen(
+    sessions: List<StudySession>,
+    books: List<Book>,
+    bookLogs: List<BookLog>,
+    habits: List<Habit>,
+    habitLogs: List<HabitLog>,
+    goals: List<SavingGoal>,
+    onStudy: () -> Unit,
+    onBooks: () -> Unit,
+    onHabits: () -> Unit,
+    onSavings: () -> Unit
+) {
+    val today = JalaliDate.todayKey()
+    val todayMinutes = sessions.filter { it.date == today }.sumOf { it.minutes }
+    val pagesToday = bookLogs.filter { it.date == today }.sumOf { it.pages }
+    val completedToday = habitLogs.count { it.date == today && it.completed }
+    val todayHabits = habits.size
+    val totalSaved = goals.sumOf { it.savedAmount }
+    val totalTarget = goals.sumOf { it.targetAmount }
+    val progressParts = listOf(
+        percent(todayMinutes, 120),
+        if (todayHabits == 0) 0f else percent(completedToday, todayHabits),
+        if (books.isEmpty()) 0f else books.count { it.status == "DONE" }.toFloat() / books.size,
+        percent(totalSaved.toInt(), totalTarget.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+    )
+    val overall = if (progressParts.all { it == 0f }) 0 else (progressParts.average() * 100).toInt()
+    val quotes = listOf(
+        "قدم‌های کوچک، نتیجه‌های بزرگ می‌سازند.",
+        "لازم نیست عالی شروع کنی؛ فقط شروع کن.",
+        "پیشرفت آرام هم پیشرفت است.",
+        "امروز فرصتی تازه برای بهتر شدن است.",
+        "به خودت قول‌های کوچک بده و به آن‌ها وفادار بمان."
+    )
+    val quoteIndex = LocalDate.now().dayOfYear % quotes.size
+
+    ScreenColumn {
+        Text("سلام، به شروع تازه خوش اومدی 🌱", fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Text(JalaliDate.format(today, true), color = Muted, fontSize = 13.sp)
+        SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
+            Text("جمله امروز", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text("«" + quotes[quoteIndex] + "»", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text("هر روز، یک قدم به نسخه بهتر خودت نزدیک‌تر شو.", color = Muted, fontSize = 12.sp)
+        }
+        SoftCard {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("پیشرفت امروز", fontWeight = FontWeight.Bold)
+                Text(JalaliDate.number(overall) + "٪", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            }
+            ProgressLine(overall / 100f)
+            Text("روزهای پیوسته با عادت‌ها: " + JalaliDate.number(overallStreak(habitLogs, today)), color = Muted, fontSize = 12.sp)
+        }
+        SectionTitle("خلاصه امروز")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MetricTile("مطالعه", JalaliDate.number(todayMinutes) + " دقیقه", "هدف پیشنهادی ۱۲۰ دقیقه", "📘", Modifier.weight(1f))
+            MetricTile("کتاب‌خوانی", JalaliDate.number(pagesToday) + " صفحه", "صفحات ثبت‌شده امروز", "📚", Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MetricTile("عادت‌ها", JalaliDate.number(completedToday) + "/" + JalaliDate.number(todayHabits), "تکمیل‌شده امروز", "🌿", Modifier.weight(1f))
+            MetricTile("پس‌انداز", toman(totalSaved), if (totalTarget > 0) "از " + toman(totalTarget) else "هدف مالی تعیین نشده", "💰", Modifier.weight(1f))
+        }
+        SectionTitle("شروع سریع")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("شروع مطالعه", onStudy, Modifier.weight(1f))
+            OutlineButton("ثبت عادت", onHabits)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlineButton("ثبت کتاب", onBooks)
+            OutlineButton("هدف پس‌انداز", onSavings)
+        }
+    }
+}
+
+@Composable
+private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessions: List<StudySession>) {
+    val scope = rememberCoroutineScope()
+    val today = JalaliDate.todayKey()
+    val todayMinutes = sessions.filter { it.date == today }.sumOf { it.minutes }
+    var running by rememberSaveable { mutableStateOf(false) }
+    var seconds by rememberSaveable { mutableIntStateOf(0) }
+    var showManual by remember { mutableStateOf(false) }
+    var timerSubject by rememberSaveable { mutableStateOf("مطالعه آزاد") }
+
+    LaunchedEffect(running) {
+        while (running) {
+            delay(1000)
+            seconds++
+        }
+    }
+
+    ScreenColumn {
+        ScreenHeader("مدیریت مطالعه", JalaliDate.format(today, true))
+        SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
+            Text("تایمر تمرکز", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text(timerSubject, fontSize = 13.sp, color = Muted)
+            Text(
+                String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+                    .let { JalaliDate.toPersianDigits(it) },
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ActionButton(if (running) "مکث" else if (seconds > 0) "ادامه" else "شروع", {
+                    running = !running
+                }, Modifier.weight(1f))
+                OutlineButton("پایان و ثبت") {
+                    running = false
+                    if (seconds > 0) {
+                        val minutes = (seconds / 60).coerceAtLeast(1)
+                        scope.launch {
+                            val subject = subjects.firstOrNull { it.name == timerSubject }
+                                ?: StudySubject(name = timerSubject)
+                            val id = if (subject.id == 0L) dao.insertSubject(subject) else subject.id
+                            dao.insertSession(StudySession(subjectId = id, subjectName = timerSubject, date = today, minutes = minutes))
+                        }
+                    }
+                    seconds = 0
+                }
+            }
+            Text("برای ثبت زمان دقیق، پس از پایان جلسه آن را ذخیره کن.", color = Muted, fontSize = 11.sp)
+        }
+        SoftCard {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("مطالعه امروز", color = Muted, fontSize = 12.sp)
+                    Text(JalaliDate.number(todayMinutes) + " دقیقه", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("هدف روزانه", color = Muted, fontSize = 12.sp)
+                    Text("۱۲۰ دقیقه", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            ProgressLine(percent(todayMinutes, 120))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("جلسه‌های اخیر")
+            ActionButton("ثبت دستی", { showManual = true })
+        }
+        if (sessions.isEmpty()) EmptyHint("هنوز جلسه‌ای ثبت نشده. اولین جلسه‌ات را شروع کن.")
+        sessions.take(20).forEach { session ->
+            SoftCard {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(session.subjectName, fontWeight = FontWeight.Bold)
+                    Text(JalaliDate.number(session.minutes) + " دقیقه", color = MaterialTheme.colorScheme.primary)
+                }
+                Text(JalaliDate.format(session.date), color = Muted, fontSize = 11.sp)
+                if (session.note.isNotBlank()) Text(session.note, fontSize = 12.sp)
+                TextButton(onClick = { scope.launch { dao.deleteSession(session.id) } }) { Text("حذف جلسه", color = Color(0xFFCC5A56)) }
+            }
+        }
+    }
+
+    if (showManual) {
+        StudyEntryDialog(subjects, onDismiss = { showManual = false }) { name, minutes, note ->
+            scope.launch {
+                val existing = subjects.firstOrNull { it.name.equals(name, true) }
+                val id = existing?.id ?: dao.insertSubject(StudySubject(name = name))
+                dao.insertSession(StudySession(subjectId = id, subjectName = name, date = today, minutes = minutes, note = note))
+            }
+            showManual = false
+        }
+    }
+}
+
+@Composable
+private fun StudyEntryDialog(
+    subjects: List<StudySubject>,
+    onDismiss: () -> Unit,
+    onSave: (String, Int, String) -> Unit
+) {
+    var name by remember { mutableStateOf(subjects.firstOrNull()?.name ?: "") }
+    var minutes by remember { mutableStateOf("۳۰") }
+    var note by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ثبت جلسه مطالعه") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it }, label = { Text("نام درس یا موضوع") }, singleLine = true)
+                OutlinedTextField(minutes, { minutes = it.filter { c -> c.isDigit() } }, label = { Text("مدت به دقیقه") }, singleLine = true)
+                OutlinedTextField(note, { note = it }, label = { Text("یادداشت جلسه") }, minLines = 2)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val value = minutes.toIntOrNull()
+                if (name.isNotBlank() && value != null && value > 0) onSave(name.trim(), value, note.trim())
+            }) { Text("ذخیره") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLog>) {
+    val scope = rememberCoroutineScope()
+    var addBook by remember { mutableStateOf(false) }
+    var selectedBook by remember { mutableStateOf<Book?>(null) }
+    ScreenColumn {
+        ScreenHeader("کتابخانه من", "هر صفحه، یک قدم به جلو")
+        SoftCard {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("کتاب‌های کامل‌شده", color = Muted, fontSize = 12.sp)
+                    Text(JalaliDate.number(books.count { it.status == "DONE" }), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("مجموع صفحات خوانده‌شده", color = Muted, fontSize = 12.sp)
+                    Text(JalaliDate.number(logs.sumOf { it.pages }), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("کتاب‌های من")
+            ActionButton("افزودن کتاب", { addBook = true })
+        }
+        if (books.isEmpty()) EmptyHint("کتاب اولت را اضافه کن تا مسیر خواندنش را دنبال کنیم.")
+        books.forEach { book ->
+            SoftCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(54.dp).background(Color(0xFFE3F4F1), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) { Text("📖", fontSize = 26.sp) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(book.title, fontWeight = FontWeight.Bold)
+                        Text(book.author.ifBlank { "نویسنده ثبت نشده" }, color = Muted, fontSize = 12.sp)
+                    }
+                    Text(JalaliDate.number((percent(book.pagesRead, book.totalPages) * 100).toInt()) + "٪", color = Teal, fontWeight = FontWeight.Bold)
+                }
+                ProgressLine(percent(book.pagesRead, book.totalPages), Gold)
+                Text(JalaliDate.number(book.pagesRead) + " از " + JalaliDate.number(book.totalPages) + " صفحه", color = Muted, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionButton("ثبت مطالعه", { selectedBook = book }, Modifier.weight(1f))
+                    TextButton(onClick = { scope.launch { dao.deleteBook(book.id) } }) { Text("حذف", color = Color(0xFFCC5A56)) }
+                }
+            }
+        }
+        if (books.any { it.status == "WANT" }) {
+            SectionTitle("کتاب بعدی من")
+            books.filter { it.status == "WANT" }.forEach { Text("☼  " + it.title, color = Muted) }
+        }
+    }
+    if (addBook) {
+        AddBookDialog(onDismiss = { addBook = false }) { title, author, total, category ->
+            scope.launch { dao.insertBook(Book(title = title, author = author, totalPages = total, category = category)) }
+            addBook = false
+        }
+    }
+    selectedBook?.let { book ->
+        ReadPagesDialog(book, onDismiss = { selectedBook = null }) { pages, note ->
+            scope.launch {
+                val next = (book.pagesRead + pages).coerceAtMost(book.totalPages)
+                dao.updateBook(book.copy(pagesRead = next, status = if (next >= book.totalPages) "DONE" else "READING"))
+                dao.insertBookLog(BookLog(bookId = book.id, date = JalaliDate.todayKey(), pages = pages, note = note))
+            }
+            selectedBook = null
+        }
+    }
+}
+
+@Composable
+private fun AddBookDialog(onDismiss: () -> Unit, onSave: (String, String, Int, String) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var author by remember { mutableStateOf("") }
+    var pages by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("کتاب جدید") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("نام کتاب") }, singleLine = true)
+                OutlinedTextField(author, { author = it }, label = { Text("نویسنده") }, singleLine = true)
+                OutlinedTextField(pages, { pages = it.filter(Char::isDigit) }, label = { Text("تعداد کل صفحات") }, singleLine = true)
+                OutlinedTextField(category, { category = it }, label = { Text("دسته‌بندی") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { val p = pages.toIntOrNull(); if (title.isNotBlank() && p != null && p > 0) onSave(title.trim(), author.trim(), p, category.trim()) }) { Text("افزودن") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun ReadPagesDialog(book: Book, onDismiss: () -> Unit, onSave: (Int, String) -> Unit) {
+    var pages by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ثبت مطالعه · " + book.title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("صفحات باقی‌مانده: " + JalaliDate.number((book.totalPages - book.pagesRead).coerceAtLeast(0)))
+                OutlinedTextField(pages, { pages = it.filter(Char::isDigit) }, label = { Text("چند صفحه خواندی؟") }, singleLine = true)
+                OutlinedTextField(note, { note = it }, label = { Text("یادداشت کوتاه") })
+            }
+        },
+        confirmButton = { TextButton(onClick = { val n = pages.toIntOrNull(); if (n != null && n > 0) onSave(n, note) }) { Text("ثبت") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun HabitsScreen(dao: StartFreshDao, habits: List<Habit>, logs: List<HabitLog>) {
+    val scope = rememberCoroutineScope()
+    val today = JalaliDate.todayKey()
+    var addHabit by remember { mutableStateOf(false) }
+    ScreenColumn {
+        ScreenHeader("عادت‌های من", "تداوم از کمال مهم‌تر است")
+        SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
+            Text("قرار نیست هر روز بی‌نقص باشی.", fontWeight = FontWeight.Bold)
+            Text("اگر دیروز جا ماندی، امروز فرصت تازه‌ای برای برگشتن است.", fontSize = 13.sp)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("فهرست عادت‌ها")
+            ActionButton("عادت جدید", { addHabit = true })
+        }
+        if (habits.isEmpty()) EmptyHint("یک عادت کوچک و قابل انجام تعریف کن.")
+        habits.forEach { habit ->
+            val log = logs.firstOrNull { it.habitId == habit.id && it.date == today }
+            val done = log?.completed == true
+            SoftCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(44.dp).background(Color(0xFFE4F5F1), CircleShape), contentAlignment = Alignment.Center) {
+                        Text(habit.icon, fontSize = 22.sp)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(habit.name, fontWeight = FontWeight.Bold)
+                        Text("هدف هفتگی: " + JalaliDate.number(habit.weeklyTarget) + " " + habit.unit, color = Muted, fontSize = 11.sp)
+                    }
+                    Switch(checked = done, onCheckedChange = {
+                        scope.launch {
+                            val existing = dao.findHabitLog(habit.id, today)
+                            if (existing == null) dao.insertHabitLog(HabitLog(habitId = habit.id, date = today, completed = true))
+                            else dao.insertHabitLog(existing.copy(completed = !existing.completed))
+                        }
+                    })
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (done) "امروز انجام شد ✓" else "هنوز ثبت نشده", color = if (done) Teal else Muted, fontSize = 12.sp)
+                    Text("استمرار: " + JalaliDate.number(streakForHabit(habit.id, logs, today)) + " روز", color = Muted, fontSize = 12.sp)
+                }
+                val weekCount = logs.count { it.habitId == habit.id && it.completed && it.date >= JalaliDate.shift(today, -6) && it.date <= today }
+                ProgressLine(percent(weekCount, habit.weeklyTarget), Gold)
+                TextButton(onClick = { scope.launch { dao.deleteHabit(habit.id) } }) { Text("حذف عادت", color = Color(0xFFCC5A56)) }
+            }
+        }
+    }
+    if (addHabit) {
+        AddHabitDialog(onDismiss = { addHabit = false }) { name, icon, target ->
+            scope.launch { dao.insertHabit(Habit(name = name, icon = icon, weeklyTarget = target)) }
+            addHabit = false
+        }
+    }
+}
+
+@Composable
+private fun AddHabitDialog(onDismiss: () -> Unit, onSave: (String, String, Int) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var icon by remember { mutableStateOf("🌱") }
+    var target by remember { mutableStateOf("۷") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ساخت عادت تازه") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it }, label = { Text("نام عادت") }, singleLine = true)
+                OutlinedTextField(icon, { icon = it }, label = { Text("ایموجی یا نماد") }, singleLine = true)
+                OutlinedTextField(target, { target = it.filter(Char::isDigit) }, label = { Text("هدف در هفته") }, singleLine = true)
+            }
+        },
+        confirmButton = { TextButton(onClick = { val n = target.toIntOrNull(); if (name.isNotBlank() && n != null && n in 1..7) onSave(name.trim(), icon.ifBlank { "✦" }, n) }) { Text("ذخیره") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun SavingsScreen(dao: StartFreshDao, goals: List<SavingGoal>, entries: List<MoneyEntry>) {
+    val scope = rememberCoroutineScope()
+    var addGoal by remember { mutableStateOf(false) }
+    var selectedGoal by remember { mutableStateOf<SavingGoal?>(null) }
+    var addMoney by remember { mutableStateOf(false) }
+    val thisMonth = JalaliDate.todayKey().take(7)
+    val income = entries.filter { it.type == "income" && it.date.startsWith(thisMonth) }.sumOf { it.amount }
+    val expense = entries.filter { it.type == "expense" && it.date.startsWith(thisMonth) }.sumOf { it.amount }
+    ScreenColumn {
+        ScreenHeader("مدیریت پول", "قدم‌های کوچک برای هدف‌های مالی")
+        SoftCard {
+            Text("خلاصه این ماه", fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) { Text("درآمد", color = Muted, fontSize = 11.sp); Text(toman(income), color = Teal, fontWeight = FontWeight.Bold) }
+                Column(Modifier.weight(1f)) { Text("هزینه", color = Muted, fontSize = 11.sp); Text(toman(expense), color = Color(0xFFCC5A56), fontWeight = FontWeight.Bold) }
+            }
+            Text("ثبت‌ها کاملاً دستی هستند و به حساب بانکی متصل نیستند.", color = Muted, fontSize = 11.sp)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("هدف جدید", { addGoal = true }, Modifier.weight(1f))
+            OutlineButton("ثبت درآمد/هزینه", { addMoney = true })
+        }
+        SectionTitle("هدف‌های پس‌انداز")
+        if (goals.isEmpty()) EmptyHint("برای پولت یک هدف روشن تعریف کن.")
+        goals.forEach { goal ->
+            SoftCard {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(goal.title, fontWeight = FontWeight.Bold)
+                    Text(JalaliDate.number((percent(goal.savedAmount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), goal.targetAmount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()) * 100).toInt()) + "٪", color = Teal, fontWeight = FontWeight.Bold)
+                }
+                ProgressLine(percent(goal.savedAmount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), goal.targetAmount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()), Gold)
+                Text(toman(goal.savedAmount) + " از " + toman(goal.targetAmount), color = Muted, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionButton("واریز به هدف", { selectedGoal = goal }, Modifier.weight(1f))
+                    TextButton(onClick = { scope.launch { dao.updateSavingGoal(goal.copy(savedAmount = 0)) } }) { Text("صفرکردن", color = Color(0xFFCC5A56)) }
+                }
+            }
+        }
+        SectionTitle("آخرین تراکنش‌ها")
+        if (entries.isEmpty()) EmptyHint("هنوز درآمد یا هزینه‌ای ثبت نشده.")
+        entries.take(15).forEach { entry ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text(entry.title, fontWeight = FontWeight.Medium)
+                    Text(JalaliDate.format(entry.date), color = Muted, fontSize = 11.sp)
+                }
+                Text((if (entry.type == "expense") "− " else "+ ") + toman(entry.amount), color = if (entry.type == "expense") Color(0xFFCC5A56) else Teal, fontWeight = FontWeight.SemiBold)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+        }
+    }
+    if (addGoal) AddGoalDialog({ addGoal = false }) { title, amount ->
+        scope.launch { dao.insertSavingGoal(SavingGoal(title = title, targetAmount = amount)) }
+        addGoal = false
+    }
+    selectedGoal?.let { goal ->
+        ContributionDialog(goal, { selectedGoal = null }) { amount ->
+            scope.launch {
+                dao.updateSavingGoal(goal.copy(savedAmount = goal.savedAmount + amount))
+                dao.insertMoneyEntry(MoneyEntry(title = "پس‌انداز: " + goal.title, amount = amount, type = "saving", category = "پس‌انداز", date = JalaliDate.todayKey()))
+            }
+            selectedGoal = null
+        }
+    }
+    if (addMoney) MoneyEntryDialog({ addMoney = false }) { title, amount, type, category ->
+        scope.launch { dao.insertMoneyEntry(MoneyEntry(title = title, amount = amount, type = type, category = category, date = JalaliDate.todayKey())) }
+        addMoney = false
+    }
+}
+
+@Composable
+private fun AddGoalDialog(onDismiss: () -> Unit, onSave: (String, Long) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("هدف مالی جدید") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("عنوان هدف") }, singleLine = true)
+                OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("مبلغ هدف به تومان") }, singleLine = true)
+            }
+        },
+        confirmButton = { TextButton(onClick = { val n = amount.toLongOrNull(); if (title.isNotBlank() && n != null && n > 0) onSave(title.trim(), n) }) { Text("ثبت هدف") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun ContributionDialog(goal: SavingGoal, onDismiss: () -> Unit, onSave: (Long) -> Unit) {
+    var amount by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("واریز به " + goal.title) },
+        text = { OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("مبلغ به تومان") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = { amount.toLongOrNull()?.takeIf { it > 0 }?.let(onSave) }) { Text("ثبت واریز") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun MoneyEntryDialog(onDismiss: () -> Unit, onSave: (String, Long, String, String) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf("expense") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ثبت تراکنش دستی") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = type == "income", onClick = { type = "income" }, label = { Text("درآمد") })
+                    FilterChip(selected = type == "expense", onClick = { type = "expense" }, label = { Text("هزینه") })
+                }
+                OutlinedTextField(title, { title = it }, label = { Text("عنوان") }, singleLine = true)
+                OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("مبلغ به تومان") }, singleLine = true)
+                OutlinedTextField(category, { category = it }, label = { Text("دسته‌بندی") }, singleLine = true)
+            }
+        },
+        confirmButton = { TextButton(onClick = { val n = amount.toLongOrNull(); if (title.isNotBlank() && n != null && n > 0) onSave(title.trim(), n, type, category.trim()) }) { Text("ذخیره") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun CalendarScreen(
+    sessions: List<StudySession>,
+    books: List<Book>,
+    bookLogs: List<BookLog>,
+    habits: List<Habit>,
+    habitLogs: List<HabitLog>,
+    goals: List<SavingGoal>,
+    journals: List<DailyJournal>
+) {
+    var selectedDate by rememberSaveable { mutableStateOf(JalaliDate.todayKey()) }
+    val daySessions = sessions.filter { it.date == selectedDate }
+    val dayPages = bookLogs.filter { it.date == selectedDate }.sumOf { it.pages }
+    val dayHabits = habitLogs.filter { it.date == selectedDate && it.completed }
+    val daySaving = goals.sumOf { goal -> goal.savedAmount }
+    val journal = journals.firstOrNull { it.date == selectedDate }
+    ScreenColumn {
+        ScreenHeader("تقویم پیشرفت", "روزهایت را با مهربانی مرور کن")
+        SoftCard {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { selectedDate = JalaliDate.shift(selectedDate, -1) }) { Text("روز قبل") }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(JalaliDate.format(selectedDate), fontWeight = FontWeight.Bold)
+                    if (selectedDate == JalaliDate.todayKey()) Text("امروز", color = Teal, fontSize = 11.sp)
+                }
+                TextButton(onClick = { selectedDate = JalaliDate.shift(selectedDate, 1) }) { Text("روز بعد") }
+            }
+        }
+        MetricTile("مدت مطالعه", JalaliDate.number(daySessions.sumOf { it.minutes }) + " دقیقه", "در این روز", "📘")
+        MetricTile("کتاب‌خوانی", JalaliDate.number(dayPages) + " صفحه", "صفحات ثبت‌شده", "📚")
+        MetricTile("عادت‌های انجام‌شده", JalaliDate.number(dayHabits.size) + " از " + JalaliDate.number(habits.size), "ثبت‌های روز", "🌱")
+        SoftCard {
+            Text("ثبت‌های مطالعه", fontWeight = FontWeight.Bold)
+            if (daySessions.isEmpty()) EmptyHint("جلسه‌ای برای این روز نیست.")
+            daySessions.forEach { Text("• " + it.subjectName + " · " + JalaliDate.number(it.minutes) + " دقیقه") }
+        }
+        SoftCard {
+            Text("دفتر روزانه", fontWeight = FontWeight.Bold)
+            Text(journal?.highlight?.ifBlank { "بدون یادداشت" } ?: "یادداشتی برای این روز ثبت نشده", color = Muted, fontSize = 13.sp)
+        }
+        Text("مجموع پس‌انداز فعلی: " + toman(daySaving), color = Muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun ReportsScreen(
+    sessions: List<StudySession>,
+    entries: List<MoneyEntry>,
+    bookLogs: List<BookLog>,
+    habitLogs: List<HabitLog>
+) {
+    val today = JalaliDate.todayKey()
+    val days = (6 downTo 0).map { JalaliDate.shift(today, -it.toLong()) }
+    val daily = days.map { date -> sessions.filter { it.date == date }.sumOf { it.minutes } }
+    val totalWeek = daily.sum()
+    val lastWeekStart = JalaliDate.shift(today, -13)
+    val lastWeekEnd = JalaliDate.shift(today, -7)
+    val previous = sessions.filter { it.date >= lastWeekStart && it.date <= lastWeekEnd }.sumOf { it.minutes }
+    val bestIndex = daily.indices.maxByOrNull { daily[it] } ?: 0
+    val month = today.take(7)
+    val income = entries.filter { it.type == "income" && it.date.startsWith(month) }.sumOf { it.amount }
+    val expense = entries.filter { it.type == "expense" && it.date.startsWith(month) }.sumOf { it.amount }
+    ScreenColumn {
+        ScreenHeader("گزارش‌های من", "آمار واقعی بر اساس ثبت‌های تو")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricTile("مطالعه هفته", JalaliDate.number(totalWeek) + " دقیقه", "۷ روز اخیر", "⏱", Modifier.weight(1f))
+            MetricTile("میانگین روزانه", JalaliDate.number(totalWeek / 7) + " دقیقه", "در هفته اخیر", "📈", Modifier.weight(1f))
+        }
+        SoftCard {
+            SectionTitle("نمودار مطالعه هفتگی")
+            WeeklyChart(daily)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("۷ روز پیش", color = Muted, fontSize = 10.sp)
+                Text("امروز", color = Muted, fontSize = 10.sp)
+            }
+        }
+        SoftCard {
+            Text("بهترین روز", fontWeight = FontWeight.Bold)
+            Text(JalaliDate.format(days[bestIndex]) + " · " + JalaliDate.number(daily[bestIndex]) + " دقیقه", color = Teal)
+            Text("مقایسه با هفته قبل: " + if (totalWeek >= previous) "افزایش " + JalaliDate.number(totalWeek - previous) + " دقیقه" else "کاهش " + JalaliDate.number(previous - totalWeek) + " دقیقه", color = Muted, fontSize = 12.sp)
+        }
+        SoftCard {
+            Text("خلاصه مالی ماه", fontWeight = FontWeight.Bold)
+            Text("درآمد: " + toman(income), color = Teal)
+            Text("هزینه: " + toman(expense), color = Color(0xFFCC5A56))
+            Text("خالص: " + toman(income - expense), fontWeight = FontWeight.Bold)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricTile("صفحات کتاب", JalaliDate.number(bookLogs.filter { it.date >= lastWeekEnd && it.date <= today }.sumOf { it.pages }), "هفته جاری", "📚", Modifier.weight(1f))
+            MetricTile("عادت‌های موفق", JalaliDate.number(habitLogs.count { it.completed && it.date >= lastWeekEnd && it.date <= today }), "هفته جاری", "🌿", Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun WeeklyChart(values: List<Int>) {
+    Canvas(Modifier.fillMaxWidth().height(150.dp).padding(vertical = 8.dp)) {
+        val maxValue = (values.maxOrNull() ?: 0).coerceAtLeast(1).toFloat()
+        val left = 12.dp.toPx()
+        val right = size.width - 12.dp.toPx()
+        val top = 12.dp.toPx()
+        val bottom = size.height - 12.dp.toPx()
+        val points = values.mapIndexed { index, value ->
+            val x = left + (right - left) * index / (values.size - 1).coerceAtLeast(1)
+            val y = bottom - (bottom - top) * value / maxValue
+            androidx.compose.ui.geometry.Offset(x, y)
+        }
+        val path = Path()
+        points.forEachIndexed { index, point ->
+            if (index == 0) path.moveTo(point.x, point.y) else path.lineTo(point.x, point.y)
+        }
+        drawPath(path, color = Teal, style = Stroke(width = 3.dp.toPx()))
+        points.forEach { drawCircle(Teal, radius = 4.dp.toPx(), center = it) }
+    }
+}
+
+@Composable
+private fun JournalScreen(dao: StartFreshDao, journals: List<DailyJournal>) {
+    val scope = rememberCoroutineScope()
+    val today = JalaliDate.todayKey()
+    val saved = journals.firstOrNull { it.date == today }
+    var mood by remember(saved) { mutableStateOf(saved?.mood ?: "🙂") }
+    var highlight by remember(saved) { mutableStateOf(saved?.highlight ?: "") }
+    var improvement by remember(saved) { mutableStateOf(saved?.improvement ?: "") }
+    var goals by remember(saved) { mutableStateOf(saved?.tomorrowGoals ?: "") }
+    var note by remember(saved) { mutableStateOf(saved?.note ?: "") }
+    ScreenColumn {
+        ScreenHeader("دفتر روزانه من", JalaliDate.format(today, true))
+        SoftCard {
+            Text("حال و هوای امروزت چطوره؟", fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf("😄", "🙂", "😐", "😔", "😴").forEach { emoji ->
+                    Box(
+                        Modifier.size(44.dp).background(if (mood == emoji) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, CircleShape).clickable { mood = emoji },
+                        contentAlignment = Alignment.Center
+                    ) { Text(emoji, fontSize = 22.sp) }
+                }
+            }
+        }
+        JournalField("مهم‌ترین اتفاق امروز", highlight, { highlight = it })
+        JournalField("امروز چه چیزی را می‌توانم بهتر کنم؟", improvement, { improvement = it })
+        JournalField("سه هدف مهم فردا", goals, { goals = it }, lines = 3)
+        JournalField("یادداشت آزاد", note, { note = it }, lines = 4)
+        ActionButton("ذخیره مرور امروز", {
+            scope.launch {
+                dao.insertJournal(DailyJournal(date = today, mood = mood, highlight = highlight, improvement = improvement, tomorrowGoals = goals, note = note))
+            }
+        }, Modifier.fillMaxWidth())
+        SectionTitle("روزهای قبلی")
+        journals.filter { it.date != today }.take(12).forEach { item ->
+            SoftCard {
+                Text(JalaliDate.format(item.date), fontWeight = FontWeight.Bold)
+                Text(item.mood + "  " + item.highlight.ifBlank { "بدون عنوان" }, color = Muted, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun JournalField(label: String, value: String, onChange: (String) -> Unit, lines: Int = 2) {
+    SoftCard {
+        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        OutlinedTextField(value, onChange, modifier = Modifier.fillMaxWidth(), minLines = lines, placeholder = { Text("اینجا بنویس…") })
+    }
+}
+
+@Composable
+private fun AwardsScreen(
+    sessions: List<StudySession>,
+    bookLogs: List<BookLog>,
+    habitLogs: List<HabitLog>,
+    books: List<Book>,
+    goals: List<SavingGoal>
+) {
+    val studyXp = sessions.sumOf { (it.minutes / 30) * 10 }
+    val readXp = bookLogs.sumOf { (it.pages / 15) * 5 }
+    val habitXp = habitLogs.count { it.completed } * 5
+    val xp = studyXp + readXp + habitXp
+    val level = 1 + xp / 100
+    val levelProgress = (xp % 100) / 100f
+    val badges = listOf(
+        Triple("شروع قدرتمند", "اولین جلسه مطالعه", sessions.isNotEmpty()),
+        Triple("هفت روز استمرار", "ثبت فعالیت در ۷ روز متوالی", overallStreak(habitLogs, JalaliDate.todayKey()) >= 7),
+        Triple("اولین کتاب", "تکمیل یک کتاب", books.any { it.status == "DONE" }),
+        Triple("۱۰۰ ساعت مطالعه", "رسیدن به ۶۰۰۰ دقیقه مطالعه", sessions.sumOf { it.minutes } >= 6000),
+        Triple("اولین پس‌انداز", "ثبت اولین هدف مالی و واریز", goals.any { it.savedAmount > 0 }),
+        Triple("نظم شخصی", "ثبت ۳۰ عادت موفق", habitLogs.count { it.completed } >= 30)
+    )
+    ScreenColumn {
+        ScreenHeader("دستاوردها", "پیشرفت واقعی تو، امتیاز واقعی تو")
+        SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
+            Text("سطح " + JalaliDate.number(level), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text(JalaliDate.number(xp) + " امتیاز تجربه (XP)", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            ProgressLine(levelProgress, Gold)
+            Text(JalaliDate.number(xp % 100) + " از ۱۰۰ امتیاز تا سطح بعدی", fontSize = 11.sp, color = Muted)
+        }
+        SectionTitle("نشان‌های افتخار")
+        badges.forEach { badge ->
+            SoftCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (badge.third) "🏅" else "🔒", fontSize = 24.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(badge.first, fontWeight = FontWeight.Bold)
+                        Text(badge.second, fontSize = 11.sp, color = Muted)
+                    }
+                    Text(if (badge.third) "دریافت شد" else "در انتظار", fontSize = 10.sp, color = if (badge.third) Teal else Muted)
+                }
+            }
+        }
+        Text("امتیاز مطالعه هر ۳۰ دقیقه ۱۰ XP، هر ۱۵ صفحه ۵ XP و هر عادت تکمیل‌شده ۵ XP است. ثبت تکراری یک عادت در یک روز امتیاز دوباره نمی‌دهد.", color = Muted, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun MoreScreen(onNavigate: (Page) -> Unit) {
+    ScreenColumn {
+        ScreenHeader("بخش‌های بیشتر", "همه ابزارهای مسیر رشدت")
+        listOf(
+            Triple(Page.SAVINGS, "مدیریت پول و پس‌انداز", "💰"),
+            Triple(Page.CALENDAR, "تقویم شمسی و مرور روزها", "🗓️"),
+            Triple(Page.REPORTS, "نمودارها و گزارش‌ها", "📊"),
+            Triple(Page.JOURNAL, "دفتر روزانه من", "📝"),
+            Triple(Page.AWARDS, "امتیازها و دستاوردها", "🏅"),
+            Triple(Page.SETTINGS, "تنظیمات و پشتیبان‌گیری", "⚙️")
+        ).forEach { item ->
+            SoftCard(Modifier.clickable { onNavigate(item.first) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.third, fontSize = 26.sp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) { Text(item.second, fontWeight = FontWeight.Bold) }
+                    Text("‹", color = Muted, fontSize = 22.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    dao: StartFreshDao,
+    subjects: List<StudySubject>,
+    sessions: List<StudySession>,
+    books: List<Book>,
+    bookLogs: List<BookLog>,
+    habits: List<Habit>,
+    habitLogs: List<HabitLog>,
+    goals: List<SavingGoal>,
+    moneyEntries: List<MoneyEntry>,
+    journals: List<DailyJournal>,
+    darkTheme: Boolean,
+    onDarkThemeChange: (Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE) }
+    var reminders by remember { mutableStateOf(prefs.getBoolean("reminders_enabled", false)) }
+    var reminderHour by remember { mutableIntStateOf(prefs.getInt("reminder_hour", 20)) }
+    var reminderMinute by remember { mutableIntStateOf(prefs.getInt("reminder_minute", 0)) }
+    var confirmRestore by remember { mutableStateOf<BackupData?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            prefs.edit().putBoolean("reminders_enabled", true).apply()
+            reminders = true
+            ReminderScheduler.schedule(context, true)
+        } else {
+            Toast.makeText(context, "برای نمایش اعلان باید مجوز را فعال کنی.", Toast.LENGTH_LONG).show()
+            reminders = false
+        }
+    }
+    val backupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val data = BackupData(subjects, sessions, books, bookLogs, habits, habitLogs, goals, moneyEntries, journals)
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(Gson().toJson(data)) }
+            }.onSuccess { Toast.makeText(context, "پشتیبان ذخیره شد.", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(context, "ذخیره پشتیبان ناموفق بود.", Toast.LENGTH_LONG).show() }
+        }
+    }
+    val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val raw = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: error("فایل قابل خواندن نیست")
+                Gson().fromJson(raw, BackupData::class.java) ?: error("ساختار پشتیبان معتبر نیست")
+            }.onSuccess { confirmRestore = it }
+                .onFailure { Toast.makeText(context, "فایل پشتیبان معتبر نیست.", Toast.LENGTH_LONG).show() }
+        }
+    }
+    val csvLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) {
+            val csv = buildString {
+                append("نوع,عنوان,مبلغ/مدت,تاریخ\n")
+                sessions.forEach { append("مطالعه,").append(it.subjectName).append(',').append(it.minutes).append(',').append(JalaliDate.short(it.date)).append('\n') }
+                moneyEntries.forEach { append(it.type).append(',').append(it.title).append(',').append(it.amount).append(',').append(JalaliDate.short(it.date)).append('\n') }
+                bookLogs.forEach { append("کتاب‌خوانی,").append(it.bookId).append(',').append(it.pages).append(',').append(JalaliDate.short(it.date)).append('\n') }
+            }
+            runCatching { context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(csv) } }
+                .onSuccess { Toast.makeText(context, "گزارش CSV ذخیره شد.", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(context, "ساخت گزارش ناموفق بود.", Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    ScreenColumn {
+        ScreenHeader("تنظیمات", "برنامه را مطابق سلیقه‌ات تنظیم کن")
+        SoftCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.weight(1f)) {
+                    Text("حالت تاریک", fontWeight = FontWeight.Bold)
+                    Text("نمایش آرام‌تر در محیط کم‌نور", color = Muted, fontSize = 11.sp)
+                }
+                Switch(checked = darkTheme, onCheckedChange = onDarkThemeChange)
+            }
+        }
+        SoftCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.weight(1f)) {
+                    Text("یادآوری روزانه", fontWeight = FontWeight.Bold)
+                    Text("یک پیام کوتاه برای مرور برنامه", color = Muted, fontSize = 11.sp)
+                }
+                Switch(checked = reminders, onCheckedChange = { enabled ->
+                    if (enabled && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        reminders = enabled
+                        prefs.edit().putBoolean("reminders_enabled", enabled).apply()
+                        ReminderScheduler.schedule(context, enabled)
+                    }
+                })
+            }
+            OutlinedButton(onClick = {
+                TimePickerDialog(context, { _, hour, minute ->
+                    reminderHour = hour; reminderMinute = minute
+                    prefs.edit().putInt("reminder_hour", hour).putInt("reminder_minute", minute).apply()
+                    if (reminders) ReminderScheduler.schedule(context, true)
+                }, reminderHour, reminderMinute, true).show()
+            }) { Text("ساعت یادآوری: " + JalaliDate.toPersianDigits(String.format("%02d:%02d", reminderHour, reminderMinute))) }
+        }
+        SoftCard {
+            Text("پشتیبان‌گیری و انتقال اطلاعات", fontWeight = FontWeight.Bold)
+            Text("فایل JSON شامل اطلاعات ذخیره‌شده را می‌توانی نگه داری و بعداً بازیابی کنی.", color = Muted, fontSize = 12.sp)
+            ActionButton("خروجی پشتیبان JSON", { backupLauncher.launch("start-fresh-backup.json") }, Modifier.fillMaxWidth())
+            OutlineButton("بازیابی از فایل JSON") { restoreLauncher.launch(arrayOf("application/json", "text/*")) }
+            OutlineButton("خروجی گزارش CSV") { csvLauncher.launch("start-fresh-report.csv") }
+        }
+        SoftCard {
+            Text("مدیریت اطلاعات", fontWeight = FontWeight.Bold)
+            Text("حذف همه اطلاعات برگشت‌پذیر نیست. پیش از آن، پشتیبان بگیر.", color = Muted, fontSize = 12.sp)
+            Button(onClick = { confirmDelete = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB94A48))) { Text("حذف همه اطلاعات") }
+        }
+        SoftCard {
+            Text("شروع تازه · نسخه ۱٫۰", fontWeight = FontWeight.Bold)
+            Text("اطلاعات به‌صورت محلی روی همین دستگاه ذخیره می‌شوند. برای استفاده روزمره نیازی به اینترنت یا حساب کاربری نیست.", color = Muted, fontSize = 12.sp)
+            Text("هر روز، یک قدم به نسخه بهتر خودت نزدیک‌تر شو.", color = Teal, fontSize = 12.sp)
+        }
+    }
+
+    confirmRestore?.let { backup ->
+        AlertDialog(
+            onDismissRequest = { confirmRestore = null },
+            title = { Text("بازیابی پشتیبان؟") },
+            text = { Text("اطلاعات فعلی با اطلاعات فایل پشتیبان جایگزین می‌شود. پیش از ادامه از اطلاعات فعلی نسخه پشتیبان بگیر.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch(Dispatchers.IO) { dao.replaceAll(backup) }
+                    confirmRestore = null
+                    Toast.makeText(context, "بازیابی اطلاعات آغاز شد.", Toast.LENGTH_SHORT).show()
+                }) { Text("بازیابی") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRestore = null }) { Text("انصراف") } }
+        )
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("همه اطلاعات حذف شود؟") },
+            text = { Text("تمام مطالعه‌ها، کتاب‌ها، عادت‌ها، تراکنش‌ها و یادداشت‌ها پاک می‌شوند.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch(Dispatchers.IO) { dao.replaceAll(BackupData()) }
+                    confirmDelete = false
+                    Toast.makeText(context, "اطلاعات برنامه پاک شد.", Toast.LENGTH_SHORT).show()
+                }) { Text("حذف همه", color = Color(0xFFCC5A56)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("لغو") } }
+        )
+    }
+}
