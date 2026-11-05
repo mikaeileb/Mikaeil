@@ -328,6 +328,8 @@ private fun HomeScreen(
     onSavings: () -> Unit
 ) {
     val today = JalaliDate.todayKey()
+    val preferences = remember { LocalContext.current.getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE) }
+    val studyTarget = remember { preferences.getInt("study_daily_target", 120) }
     val todayMinutes = sessions.filter { it.date == today }.sumOf { it.minutes }
     val pagesToday = bookLogs.filter { it.date == today }.sumOf { it.pages }
     val completedToday = habitLogs.count { it.date == today && it.completed }
@@ -335,7 +337,7 @@ private fun HomeScreen(
     val totalSaved = goals.sumOf { it.savedAmount }
     val totalTarget = goals.sumOf { it.targetAmount }
     val progressParts = listOf(
-        percent(todayMinutes, 120),
+        percent(todayMinutes, studyTarget),
         if (todayHabits == 0) 0f else percent(completedToday, todayHabits),
         if (books.isEmpty()) 0f else books.count { it.status == "DONE" }.toFloat() / books.size,
         percent(totalSaved.toInt(), totalTarget.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
@@ -368,7 +370,7 @@ private fun HomeScreen(
         }
         SectionTitle("خلاصه امروز")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricTile("مطالعه", JalaliDate.number(todayMinutes) + " دقیقه", "هدف پیشنهادی ۱۲۰ دقیقه", "📘", Modifier.weight(1f))
+            MetricTile("مطالعه", JalaliDate.number(todayMinutes) + " دقیقه", "هدف روزانه " + JalaliDate.number(studyTarget) + " دقیقه", "📘", Modifier.weight(1f))
             MetricTile("کتاب‌خوانی", JalaliDate.number(pagesToday) + " صفحه", "صفحات ثبت‌شده امروز", "📚", Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -614,6 +616,12 @@ private fun StudyEntryDialog(
 @Composable
 private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLog>) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val preferences = remember { context.getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE) }
+    val today = JalaliDate.todayKey()
+    val pagesToday = logs.filter { it.date == today }.sumOf { it.pages }
+    var pageGoal by rememberSaveable { mutableIntStateOf(preferences.getInt("book_daily_target", 10)) }
+    var showPageGoal by remember { mutableStateOf(false) }
     var addBook by remember { mutableStateOf(false) }
     var selectedBook by remember { mutableStateOf<Book?>(null) }
     ScreenColumn {
@@ -629,6 +637,12 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
                     Text(JalaliDate.number(logs.sumOf { it.pages }), fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 }
             }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("هدف امروز: " + JalaliDate.number(pageGoal) + " صفحه", fontSize = 12.sp, color = Muted)
+                TextButton(onClick = { showPageGoal = true }) { Text("تغییر هدف") }
+            }
+            ProgressLine(percent(pagesToday, pageGoal), Gold)
+            Text("امروز " + JalaliDate.number(pagesToday) + " صفحه خوانده‌ای.", fontSize = 11.sp, color = Muted)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             SectionTitle("کتاب‌های من")
@@ -662,6 +676,13 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
             books.filter { it.status == "WANT" }.forEach { Text("☼  " + it.title, color = Muted) }
         }
     }
+    if (showPageGoal) {
+        PageGoalDialog(pageGoal, { showPageGoal = false }) { next ->
+            pageGoal = next
+            preferences.edit().putInt("book_daily_target", next).apply()
+            showPageGoal = false
+        }
+    }
     if (addBook) {
         AddBookDialog(onDismiss = { addBook = false }) { title, author, total, category ->
             scope.launch { dao.insertBook(Book(title = title, author = author, totalPages = total, category = category)) }
@@ -687,6 +708,18 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
             selectedBook = null
         }
     }
+}
+
+@Composable
+private fun PageGoalDialog(current: Int, onDismiss: () -> Unit, onSave: (Int) -> Unit) {
+    var value by remember { mutableStateOf(current.toString()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("هدف روزانه کتاب‌خوانی") },
+        text = { OutlinedTextField(value, { value = it.filter(Char::isDigit) }, label = { Text("تعداد صفحه در روز") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = { parseInputInt(value)?.takeIf { it in 1..500 }?.let(onSave) }) { Text("ذخیره") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
 }
 
 @Composable
