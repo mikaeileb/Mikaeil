@@ -380,13 +380,31 @@ private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessio
     val todayMinutes = sessions.filter { it.date == today }.sumOf { it.minutes }
     var running by rememberSaveable { mutableStateOf(false) }
     var seconds by rememberSaveable { mutableIntStateOf(0) }
+    var pomodoroMode by rememberSaveable { mutableStateOf(false) }
+    var pomodoroRemaining by rememberSaveable { mutableIntStateOf(25 * 60) }
     var showManual by remember { mutableStateOf(false) }
     var timerSubject by rememberSaveable { mutableStateOf("مطالعه آزاد") }
 
-    LaunchedEffect(running) {
+    LaunchedEffect(running, pomodoroMode) {
         while (running) {
             delay(1000)
-            seconds++
+            if (pomodoroMode) {
+                if (pomodoroRemaining <= 1) {
+                    running = false
+                    val subject = subjects.firstOrNull { it.name == timerSubject }
+                        ?: StudySubject(name = timerSubject)
+                    scope.launch {
+                        val id = if (subject.id == 0L) dao.insertSubject(subject) else subject.id
+                        dao.insertSession(StudySession(subjectId = id, subjectName = timerSubject, date = today, minutes = 25))
+                    }
+                    pomodoroRemaining = 25 * 60
+                    seconds = 0
+                } else {
+                    pomodoroRemaining--
+                }
+            } else {
+                seconds++
+            }
         }
     }
 
@@ -394,9 +412,14 @@ private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessio
         ScreenHeader("مدیریت مطالعه", JalaliDate.format(today, true))
         SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
             Text("تایمر تمرکز", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !pomodoroMode, onClick = { running = false; pomodoroMode = false; seconds = 0 }, label = { Text("تایمر آزاد") })
+                FilterChip(selected = pomodoroMode, onClick = { running = false; pomodoroMode = true; pomodoroRemaining = 25 * 60 }, label = { Text("پومودورو ۲۵ دقیقه") })
+            }
             OutlinedTextField(timerSubject, { timerSubject = it }, label = { Text("درس یا موضوع") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            val shown = if (pomodoroMode) pomodoroRemaining else seconds
             Text(
-                String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+                String.format("%02d:%02d:%02d", shown / 3600, (shown % 3600) / 60, shown % 60)
                     .let { JalaliDate.toPersianDigits(it) },
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Bold,
@@ -409,8 +432,9 @@ private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessio
                 }, Modifier.weight(1f))
                 OutlineButton("پایان و ثبت") {
                     running = false
-                    if (seconds > 0) {
-                        val minutes = (seconds / 60).coerceAtLeast(1)
+                    val elapsed = if (pomodoroMode) (25 * 60 - pomodoroRemaining) else seconds
+                    if (elapsed > 0) {
+                        val minutes = (elapsed / 60).coerceAtLeast(1)
                         scope.launch {
                             val subject = subjects.firstOrNull { it.name == timerSubject }
                                 ?: StudySubject(name = timerSubject)
@@ -419,9 +443,10 @@ private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessio
                         }
                     }
                     seconds = 0
+                    pomodoroRemaining = 25 * 60
                 }
             }
-            Text("برای ثبت زمان دقیق، پس از پایان جلسه آن را ذخیره کن.", color = Muted, fontSize = 11.sp)
+            Text(if (pomodoroMode) "با پایان ۲۵ دقیقه، جلسه به‌صورت خودکار ثبت می‌شود." else "برای ثبت زمان دقیق، پس از پایان جلسه آن را ذخیره کن.", color = Muted, fontSize = 11.sp)
         }
         SoftCard {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
