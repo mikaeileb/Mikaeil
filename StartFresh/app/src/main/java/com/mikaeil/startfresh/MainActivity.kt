@@ -775,7 +775,7 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
                         bookToDelete = null
                     }
                 ) {
-                    Text("حذف کتاب", color = Color(0xFFCC5A56))
+                    Text("بله، حذف شود", color = Color(0xFFCC5A56))
                 }
             },
             dismissButton = { TextButton(onClick = { bookToDelete = null }) { Text("انصراف") } }
