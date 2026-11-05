@@ -28,8 +28,9 @@ object JalaliDate {
         return try {
             val date = LocalDate.parse(isoDate)
             val (jy, jm, jd) = convert(date.year, date.monthValue, date.dayOfMonth)
-            val base = "\${number(jy)}/\${number(jm).padStart(2, '۰')}/\${number(jd).padStart(2, '۰')} · \${months[jm - 1]}"
-            if (includeWeekday) "\${weekdays[date.dayOfWeek.value - 1]}، $base" else base
+            val base = number(jy) + "/" + number(jm).padStart(2, '۰') + "/" +
+                number(jd).padStart(2, '۰') + " · " + months[jm - 1]
+            if (includeWeekday) weekdays[date.dayOfWeek.value - 1] + "، " + base else base
         } catch (_: Exception) {
             isoDate
         }
@@ -39,7 +40,7 @@ object JalaliDate {
         return try {
             val date = LocalDate.parse(isoDate)
             val (jy, jm, jd) = convert(date.year, date.monthValue, date.dayOfMonth)
-            "\${number(jy)}/\${number(jm).padStart(2, '۰')}/\${number(jd).padStart(2, '۰')}"
+            number(jy) + "/" + number(jm).padStart(2, '۰') + "/" + number(jd).padStart(2, '۰')
         } catch (_: Exception) { isoDate }
     }
 
