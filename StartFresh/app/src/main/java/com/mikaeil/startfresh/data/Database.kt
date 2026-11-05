@@ -144,6 +144,7 @@ interface StartFreshDao {
     @Query("SELECT * FROM book_logs WHERE bookId = :bookId AND date = :date LIMIT 1") suspend fun findBookLog(bookId: Long, date: String): BookLog?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertHabit(value: Habit): Long
+    @Update suspend fun updateHabit(value: Habit)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertHabitLog(value: HabitLog): Long
     @Query("SELECT * FROM habit_logs WHERE habitId = :habitId AND date = :date LIMIT 1") suspend fun findHabitLog(habitId: Long, date: String): HabitLog?
     @Query("DELETE FROM habits WHERE id = :id") suspend fun deleteHabit(id: Long)
