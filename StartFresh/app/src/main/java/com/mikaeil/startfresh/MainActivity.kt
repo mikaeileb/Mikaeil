@@ -492,7 +492,7 @@ private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessio
             Text("هدف ماهانه پیشنهادی: " + JalaliDate.number(dailyTarget * 30) + " دقیقه", color = Muted, fontSize = 11.sp)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle("جلسه‌های اخیر")
+            Text("جلسه‌های اخیر", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 16.sp)
             ActionButton("ثبت دستی", { showManual = true })
         }
         if (sessions.isEmpty()) EmptyHint("هنوز جلسه‌ای ثبت نشده. اولین جلسه‌ات را شروع کن.")
@@ -582,15 +582,64 @@ private fun StudyEntryDialog(
 private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLog>) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val preferences = remember { context.getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE) }
+    val preferences = remember(context) { context.getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE) }
     val today = JalaliDate.todayKey()
     val pagesToday = logs.filter { it.date == today }.sumOf { it.pages }
     var pageGoal by rememberSaveable { mutableIntStateOf(preferences.getInt("book_daily_target", 10)) }
     var showPageGoal by remember { mutableStateOf(false) }
-    var addBook by remember { mutableStateOf(false) }
+    var showAddBook by remember { mutableStateOf(false) }
+    var bookToEdit by remember { mutableStateOf<Book?>(null) }
+    var bookToDelete by remember { mutableStateOf<Book?>(null) }
     var selectedBook by remember { mutableStateOf<Book?>(null) }
+
+    fun saveBook(existing: Book?, title: String, author: String, totalPages: Int, category: String) {
+        val duplicate = books.any {
+            it.id != (existing?.id ?: 0L) && it.title.trim().equals(title.trim(), ignoreCase = true)
+        }
+        if (duplicate) {
+            Toast.makeText(context, "این کتاب قبلاً به کتابخانه اضافه شده است.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (existing != null && totalPages < existing.pagesRead) {
+            Toast.makeText(context, "تعداد کل صفحات نمی‌تواند کمتر از صفحات خوانده‌شده باشد.", Toast.LENGTH_LONG).show()
+            return
+        }
+        scope.launch {
+            if (existing == null) {
+                dao.insertBook(Book(title = title.trim(), author = author.trim(), totalPages = totalPages, category = category.trim()))
+                Toast.makeText(context, "کتاب به کتابخانه اضافه شد.", Toast.LENGTH_SHORT).show()
+            } else {
+                val nextStatus = when {
+                    existing.pagesRead >= totalPages -> "DONE"
+                    existing.pagesRead > 0 -> "READING"
+                    else -> existing.status
+                }
+                dao.updateBook(existing.copy(
+                    title = title.trim(),
+                    author = author.trim(),
+                    totalPages = totalPages,
+                    category = category.trim(),
+                    status = nextStatus
+                ))
+                Toast.makeText(context, "مشخصات کتاب به‌روزرسانی شد.", Toast.LENGTH_SHORT).show()
+            }
+        }
+        showAddBook = false
+        bookToEdit = null
+    }
+
     ScreenColumn {
-        ScreenHeader("کتابخانه من", "هر صفحه، یک قدم به جلو")
+        ScreenHeader("کتابخانه من", "کتاب‌هایت را ثبت کن و پیشرفت خواندنشان را دنبال کن")
+
+        // Primary action is deliberately full-width and placed before the statistics card.
+        Button(
+            onClick = { showAddBook = true },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Text("＋  افزودن کتاب جدید", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        }
+
         SoftCard {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
@@ -602,72 +651,159 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
                     Text(JalaliDate.number(logs.sumOf { it.pages }), fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text("هدف امروز: " + JalaliDate.number(pageGoal) + " صفحه", fontSize = 12.sp, color = Muted)
                 TextButton(onClick = { showPageGoal = true }) { Text("تغییر هدف") }
             }
             ProgressLine(percent(pagesToday, pageGoal), Gold)
             Text("امروز " + JalaliDate.number(pagesToday) + " صفحه خوانده‌ای.", fontSize = 11.sp, color = Muted)
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle("کتاب‌های من")
-            ActionButton("افزودن کتاب", { addBook = true })
+
+        SectionTitle("کتاب‌های من", JalaliDate.number(books.size) + " عنوان")
+        if (books.isEmpty()) {
+            SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
+                Text("هنوز کتابی در کتابخانه‌ات نیست.", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("با دکمه «افزودن کتاب جدید» اولین کتابت را ثبت کن.", color = Muted, fontSize = 13.sp)
+                Button(
+                    onClick = { showAddBook = true },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("＋  ثبت اولین کتاب", fontWeight = FontWeight.Bold)
+                }
+            }
         }
-        if (books.isEmpty()) EmptyHint("کتاب اولت را اضافه کن تا مسیر خواندنش را دنبال کنیم.")
+
         books.forEach { book ->
             SoftCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier.size(54.dp).background(Color(0xFFE3F4F1), RoundedCornerShape(14.dp)),
                         contentAlignment = Alignment.Center
-                    ) { Text("📖", fontSize = 26.sp) }
+                    ) {
+                        Text("📖", fontSize = 26.sp)
+                    }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(book.title, fontWeight = FontWeight.Bold)
                         Text(book.author.ifBlank { "نویسنده ثبت نشده" }, color = Muted, fontSize = 12.sp)
+                        if (book.category.isNotBlank()) Text(book.category, color = Muted, fontSize = 11.sp)
                     }
-                    Text(JalaliDate.number((percent(book.pagesRead, book.totalPages) * 100).toInt()) + "٪", color = Teal, fontWeight = FontWeight.Bold)
+                    Text(
+                        JalaliDate.number((percent(book.pagesRead, book.totalPages) * 100).toInt()) + "٪",
+                        color = Teal,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
                 ProgressLine(percent(book.pagesRead, book.totalPages), Gold)
-                Text(JalaliDate.number(book.pagesRead) + " از " + JalaliDate.number(book.totalPages) + " صفحه", color = Muted, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("ثبت مطالعه", { selectedBook = book }, Modifier.weight(1f))
-                    TextButton(onClick = { scope.launch { dao.deleteBookLogsForBook(book.id); dao.deleteBook(book.id) } }) { Text("حذف", color = Color(0xFFCC5A56)) }
+                Text(
+                    JalaliDate.number(book.pagesRead) + " از " + JalaliDate.number(book.totalPages) + " صفحه",
+                    color = Muted,
+                    fontSize = 12.sp
+                )
+                Button(
+                    onClick = { selectedBook = book },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text(if (book.status == "DONE") "ثبت مطالعه بیشتر" else "ثبت صفحات مطالعه‌شده")
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { bookToEdit = book },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("✎  ویرایش")
+                    }
+                    OutlinedButton(
+                        onClick = { bookToDelete = book },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFCC5A56))
+                    ) {
+                        Text("حذف کتاب")
+                    }
                 }
             }
         }
-        if (books.any { it.status == "WANT" }) {
-            SectionTitle("کتاب بعدی من")
-            books.filter { it.status == "WANT" }.forEach { Text("☼  " + it.title, color = Muted) }
-        }
     }
+
     if (showPageGoal) {
-        PageGoalDialog(pageGoal, { showPageGoal = false }) { next ->
+        PageGoalDialog(pageGoal, onDismiss = { showPageGoal = false }) { next ->
             pageGoal = next
             preferences.edit().putInt("book_daily_target", next).apply()
             showPageGoal = false
         }
     }
-    if (addBook) {
-        AddBookDialog(onDismiss = { addBook = false }) { title, author, total, category ->
-            scope.launch { dao.insertBook(Book(title = title, author = author, totalPages = total, category = category)) }
-            addBook = false
-        }
+    if (showAddBook) {
+        BookEditorDialog(
+            initialBook = null,
+            onDismiss = { showAddBook = false },
+            onSave = { title, author, pages, category -> saveBook(null, title, author, pages, category) }
+        )
+    }
+    bookToEdit?.let { book ->
+        BookEditorDialog(
+            initialBook = book,
+            onDismiss = { bookToEdit = null },
+            onSave = { title, author, pages, category -> saveBook(book, title, author, pages, category) }
+        )
+    }
+    bookToDelete?.let { book ->
+        AlertDialog(
+            onDismissRequest = { bookToDelete = null },
+            title = { Text("حذف کتاب؟") },
+            text = {
+                Text("«${book.title}» و سوابق صفحات خوانده‌شده آن حذف می‌شود. این کار قابل بازگشت نیست.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            dao.deleteBookLogsForBook(book.id)
+                            dao.deleteBook(book.id)
+                            Toast.makeText(context, "کتاب و سوابقش حذف شد.", Toast.LENGTH_SHORT).show()
+                        }
+                        bookToDelete = null
+                    }
+                ) {
+                    Text("حذف کتاب", color = Color(0xFFCC5A56))
+                }
+            },
+            dismissButton = { TextButton(onClick = { bookToDelete = null }) { Text("انصراف") } }
+        )
     }
     selectedBook?.let { book ->
         ReadPagesDialog(book, onDismiss = { selectedBook = null }) { pages, note ->
             scope.launch {
                 val next = (book.pagesRead + pages).coerceAtMost(book.totalPages)
                 val actualPages = (next - book.pagesRead).coerceAtLeast(0)
-                dao.updateBook(book.copy(pagesRead = next, status = if (next >= book.totalPages) "DONE" else "READING"))
                 if (actualPages > 0) {
+                    dao.updateBook(book.copy(
+                        pagesRead = next,
+                        status = if (next >= book.totalPages) "DONE" else "READING"
+                    ))
                     val day = JalaliDate.todayKey()
                     val previous = dao.findBookLog(book.id, day)
                     if (previous == null) {
-                        dao.insertBookLog(BookLog(bookId = book.id, date = day, pages = actualPages, note = note))
+                        dao.insertBookLog(BookLog(bookId = book.id, date = day, pages = actualPages, note = note.trim()))
                     } else {
-                        dao.insertBookLog(previous.copy(pages = previous.pages + actualPages, note = note.ifBlank { previous.note }))
+                        dao.insertBookLog(previous.copy(
+                            pages = previous.pages + actualPages,
+                            note = note.trim().ifBlank { previous.note }
+                        ))
                     }
+                    Toast.makeText(context, "مطالعه ثبت شد.", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "صفحه باقی‌مانده‌ای برای ثبت وجود ندارد.", Toast.LENGTH_SHORT).show()
                 }
             }
             selectedBook = null
@@ -688,24 +824,70 @@ private fun PageGoalDialog(current: Int, onDismiss: () -> Unit, onSave: (Int) ->
 }
 
 @Composable
-private fun AddBookDialog(onDismiss: () -> Unit, onSave: (String, String, Int, String) -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var author by remember { mutableStateOf("") }
-    var pages by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
+private fun BookEditorDialog(
+    initialBook: Book?,
+    onDismiss: () -> Unit,
+    onSave: (String, String, Int, String) -> Unit
+) {
+    var title by remember(initialBook?.id) { mutableStateOf(initialBook?.title.orEmpty()) }
+    var author by remember(initialBook?.id) { mutableStateOf(initialBook?.author.orEmpty()) }
+    var pages by remember(initialBook?.id) { mutableStateOf(initialBook?.totalPages?.toString().orEmpty()) }
+    var category by remember(initialBook?.id) { mutableStateOf(initialBook?.category.orEmpty()) }
+    val parsedPages = parseInputInt(pages)
+    val minimumPages = initialBook?.pagesRead ?: 1
+    val isValid = title.isNotBlank() && parsedPages != null && parsedPages >= minimumPages && parsedPages > 0
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("کتاب جدید") },
+        title = { Text(if (initialBook == null) "افزودن کتاب جدید" else "ویرایش مشخصات کتاب") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("نام کتاب") }, singleLine = true)
-                OutlinedTextField(author, { author = it }, label = { Text("نویسنده") }, singleLine = true)
-                OutlinedTextField(pages, { pages = it.filter(Char::isDigit) }, label = { Text("تعداد کل صفحات") }, singleLine = true)
-                OutlinedTextField(category, { category = it }, label = { Text("دسته‌بندی") }, singleLine = true)
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("نام کتاب") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = author,
+                    onValueChange = { author = it },
+                    label = { Text("نویسنده") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = pages,
+                    onValueChange = { pages = it.filter(Char::isDigit) },
+                    label = { Text("تعداد کل صفحات") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (initialBook != null && initialBook.pagesRead > 0) {
+                    Text(
+                        "تا الان ${JalaliDate.number(initialBook.pagesRead)} صفحه خوانده‌ای؛ تعداد کل نمی‌تواند کمتر باشد.",
+                        color = Muted,
+                        fontSize = 11.sp
+                    )
+                }
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("دسته‌بندی (اختیاری)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { val p = parseInputInt(pages); if (title.isNotBlank() && p != null && p > 0) onSave(title.trim(), author.trim(), p, category.trim()) }) { Text("افزودن") }
+            TextButton(
+                enabled = isValid,
+                onClick = {
+                    onSave(title.trim(), author.trim(), parsedPages ?: 1, category.trim())
+                }
+            ) {
+                Text(if (initialBook == null) "افزودن کتاب" else "ذخیره تغییرات")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
@@ -779,7 +961,7 @@ private fun HabitsScreen(dao: StartFreshDao, habits: List<Habit>, logs: List<Hab
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SectionTitle("فهرست عادت‌ها")
+            Text("فهرست عادت‌ها", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Text(JalaliDate.number(habits.size) + " عادت", color = Muted, fontSize = 12.sp)
         }
 
