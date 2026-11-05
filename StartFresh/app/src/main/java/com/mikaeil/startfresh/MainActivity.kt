@@ -712,6 +712,7 @@ private fun SavingsScreen(dao: StartFreshDao, goals: List<SavingGoal>, entries: 
     val scope = rememberCoroutineScope()
     var addGoal by remember { mutableStateOf(false) }
     var selectedGoal by remember { mutableStateOf<SavingGoal?>(null) }
+    var withdrawGoal by remember { mutableStateOf<SavingGoal?>(null) }
     var addMoney by remember { mutableStateOf(false) }
     val thisMonth = JalaliDate.todayKey().take(7)
     val income = entries.filter { it.type == "income" && it.date.startsWith(thisMonth) }.sumOf { it.amount }
@@ -741,8 +742,8 @@ private fun SavingsScreen(dao: StartFreshDao, goals: List<SavingGoal>, entries: 
                 ProgressLine(percent(goal.savedAmount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), goal.targetAmount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()), Gold)
                 Text(toman(goal.savedAmount) + " از " + toman(goal.targetAmount), color = Muted, fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("واریز به هدف", { selectedGoal = goal }, Modifier.weight(1f))
-                    TextButton(onClick = { scope.launch { dao.updateSavingGoal(goal.copy(savedAmount = 0)) } }) { Text("صفرکردن", color = Color(0xFFCC5A56)) }
+                    ActionButton("واریز", { selectedGoal = goal }, Modifier.weight(1f))
+                    OutlineButton("برداشت") { withdrawGoal = goal }
                 }
             }
         }
@@ -770,6 +771,15 @@ private fun SavingsScreen(dao: StartFreshDao, goals: List<SavingGoal>, entries: 
                 dao.insertMoneyEntry(MoneyEntry(title = "پس‌انداز: " + goal.title, amount = amount, type = "saving", category = "پس‌انداز", date = JalaliDate.todayKey()))
             }
             selectedGoal = null
+        }
+    }
+    withdrawGoal?.let { goal ->
+        WithdrawDialog(goal, { withdrawGoal = null }) { amount ->
+            scope.launch {
+                dao.updateSavingGoal(goal.copy(savedAmount = (goal.savedAmount - amount).coerceAtLeast(0)))
+                dao.insertMoneyEntry(MoneyEntry(title = "برداشت از: " + goal.title, amount = amount, type = "expense", category = "برداشت پس‌انداز", date = JalaliDate.todayKey()))
+            }
+            withdrawGoal = null
         }
     }
     if (addMoney) MoneyEntryDialog({ addMoney = false }) { title, amount, type, category ->
@@ -804,6 +814,27 @@ private fun ContributionDialog(goal: SavingGoal, onDismiss: () -> Unit, onSave: 
         title = { Text("واریز به " + goal.title) },
         text = { OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("مبلغ به تومان") }, singleLine = true) },
         confirmButton = { TextButton(onClick = { parseInputLong(amount)?.takeIf { it > 0 }?.let(onSave) }) { Text("ثبت واریز") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun WithdrawDialog(goal: SavingGoal, onDismiss: () -> Unit, onSave: (Long) -> Unit) {
+    var amount by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("برداشت از " + goal.title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("موجودی فعلی: " + toman(goal.savedAmount), color = Muted, fontSize = 12.sp)
+                OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("مبلغ برداشت به تومان") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                parseInputLong(amount)?.takeIf { it > 0 && it <= goal.savedAmount }?.let(onSave)
+            }) { Text("ثبت برداشت") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
 }
