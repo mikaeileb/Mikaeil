@@ -330,7 +330,7 @@ private fun HomeScreen(
     val today = JalaliDate.todayKey()
     val context = LocalContext.current
     val preferences = remember(context) { context.getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE) }
-    val studyTarget = remember(preferences) { preferences.getInt("study_daily_target", 120) }
+    val studyTarget = preferences.getInt("study_daily_target", 120)
     val todayMinutes = sessions.filter { it.date == today }.sumOf { it.minutes }
     val pagesToday = bookLogs.filter { it.date == today }.sumOf { it.pages }
     val completedToday = habitLogs.count { it.date == today && it.completed }
