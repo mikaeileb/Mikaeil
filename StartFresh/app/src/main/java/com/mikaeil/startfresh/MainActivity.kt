@@ -733,74 +733,265 @@ private fun ReadPagesDialog(book: Book, onDismiss: () -> Unit, onSave: (Int, Str
 @Composable
 private fun HabitsScreen(dao: StartFreshDao, habits: List<Habit>, logs: List<HabitLog>) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val today = JalaliDate.todayKey()
-    var addHabit by remember { mutableStateOf(false) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var habitToEdit by remember { mutableStateOf<Habit?>(null) }
+    var habitToDelete by remember { mutableStateOf<Habit?>(null) }
+
+    fun saveHabit(existing: Habit?, name: String, icon: String, target: Int, unit: String) {
+        val duplicate = habits.any {
+            it.id != (existing?.id ?: 0L) && it.name.trim().equals(name.trim(), ignoreCase = true)
+        }
+        if (duplicate) {
+            Toast.makeText(context, "این عادت قبلاً ثبت شده است.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            val value = if (existing == null) {
+                Habit(name = name.trim(), icon = icon, weeklyTarget = target, unit = unit.trim())
+            } else {
+                existing.copy(name = name.trim(), icon = icon, weeklyTarget = target, unit = unit.trim())
+            }
+            if (existing == null) dao.insertHabit(value) else dao.updateHabit(value)
+            Toast.makeText(context, if (existing == null) "عادت جدید اضافه شد." else "عادت ویرایش شد.", Toast.LENGTH_SHORT).show()
+        }
+        showAddDialog = false
+        habitToEdit = null
+    }
+
     ScreenColumn {
         ScreenHeader("عادت‌های من", "تداوم از کمال مهم‌تر است")
         SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
-            Text("قرار نیست هر روز بی‌نقص باشی.", fontWeight = FontWeight.Bold)
-            Text("اگر دیروز جا ماندی، امروز فرصت تازه‌ای برای برگشتن است.", fontSize = 13.sp)
+            Text("عادت‌هایت را اینجا بساز و هر روز انجام‌شدنشان را ثبت کن.", fontWeight = FontWeight.SemiBold)
+            Text("می‌توانی نام، نماد و هدف هفتگی هر عادت را هر زمان ویرایش کنی.", color = Muted, fontSize = 12.sp)
+            Button(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("＋  افزودن عادت جدید", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             SectionTitle("فهرست عادت‌ها")
-            ActionButton("عادت جدید", { addHabit = true })
+            Text(JalaliDate.number(habits.size) + " عادت", color = Muted, fontSize = 12.sp)
         }
-        if (habits.isEmpty()) EmptyHint("یک عادت کوچک و قابل انجام تعریف کن.")
+
+        if (habits.isEmpty()) {
+            SoftCard {
+                EmptyHint("هنوز عادتی نساخته‌ای. با دکمه بالا اولین عادتت را اضافه کن.")
+                OutlinedButton(
+                    onClick = { showAddDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("ساخت اولین عادت")
+                }
+            }
+        }
+
         habits.forEach { habit ->
             val log = logs.firstOrNull { it.habitId == habit.id && it.date == today }
             val done = log?.completed == true
+            val weekStart = JalaliDate.shift(today, -6)
+            val weekCount = logs.count {
+                it.habitId == habit.id && it.completed && it.date >= weekStart && it.date <= today
+            }
             SoftCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).background(Color(0xFFE4F5F1), CircleShape), contentAlignment = Alignment.Center) {
-                        Text(habit.icon, fontSize = 22.sp)
+                    Box(
+                        Modifier.size(48.dp).background(Color(0xFFE4F5F1), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(habit.icon, fontSize = 24.sp)
                     }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(habit.name, fontWeight = FontWeight.Bold)
-                        Text("هدف هفتگی: " + JalaliDate.number(habit.weeklyTarget) + " " + habit.unit, color = Muted, fontSize = 11.sp)
+                        Text(habit.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            "هدف هفتگی: " + JalaliDate.number(habit.weeklyTarget) + " " + habit.unit,
+                            color = Muted,
+                            fontSize = 12.sp
+                        )
                     }
-                    Switch(checked = done, onCheckedChange = {
+                    Text(
+                        JalaliDate.number(streakForHabit(habit.id, logs, today)) + " روز",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+                Button(
+                    onClick = {
                         scope.launch {
                             val existing = dao.findHabitLog(habit.id, today)
-                            if (existing == null) dao.insertHabitLog(HabitLog(habitId = habit.id, date = today, completed = true))
-                            else dao.insertHabitLog(existing.copy(completed = !existing.completed))
+                            if (existing == null) {
+                                dao.insertHabitLog(HabitLog(habitId = habit.id, date = today, completed = true))
+                            } else {
+                                dao.insertHabitLog(existing.copy(completed = !existing.completed))
+                            }
                         }
-                    })
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (done) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text(
+                        if (done) "✓ امروز انجام شد · برای لغو لمس کن" else "ثبت انجام امروز",
+                        color = if (done) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(if (done) "امروز انجام شد ✓" else "هنوز ثبت نشده", color = if (done) Teal else Muted, fontSize = 12.sp)
-                    Text("استمرار: " + JalaliDate.number(streakForHabit(habit.id, logs, today)) + " روز", color = Muted, fontSize = 12.sp)
+                    Text(
+                        "استمرار: " + JalaliDate.number(streakForHabit(habit.id, logs, today)) + " روز",
+                        color = Muted,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        JalaliDate.number(weekCount) + " از " + JalaliDate.number(habit.weeklyTarget) + " این هفته",
+                        color = Muted,
+                        fontSize = 12.sp
+                    )
                 }
-                val weekCount = logs.count { it.habitId == habit.id && it.completed && it.date >= JalaliDate.shift(today, -6) && it.date <= today }
                 ProgressLine(percent(weekCount, habit.weeklyTarget), Gold)
-                TextButton(onClick = { scope.launch { dao.deleteHabitLogsForHabit(habit.id); dao.deleteHabit(habit.id) } }) { Text("حذف عادت", color = Color(0xFFCC5A56)) }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { habitToEdit = habit },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("✎  ویرایش")
+                    }
+                    OutlinedButton(
+                        onClick = { habitToDelete = habit },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFCC5A56))
+                    ) {
+                        Text("حذف عادت")
+                    }
+                }
             }
         }
     }
-    if (addHabit) {
-        AddHabitDialog(onDismiss = { addHabit = false }) { name, icon, target ->
-            scope.launch { dao.insertHabit(Habit(name = name, icon = icon, weeklyTarget = target)) }
-            addHabit = false
-        }
+
+    if (showAddDialog) {
+        HabitEditorDialog(
+            initialHabit = null,
+            onDismiss = { showAddDialog = false },
+            onSave = { name, icon, target, unit -> saveHabit(null, name, icon, target, unit) }
+        )
+    }
+    habitToEdit?.let { habit ->
+        HabitEditorDialog(
+            initialHabit = habit,
+            onDismiss = { habitToEdit = null },
+            onSave = { name, icon, target, unit -> saveHabit(habit, name, icon, target, unit) }
+        )
+    }
+    habitToDelete?.let { habit ->
+        AlertDialog(
+            onDismissRequest = { habitToDelete = null },
+            title = { Text("حذف عادت؟") },
+            text = {
+                Text("«${habit.name}» و تمام سوابق انجام روزانه آن حذف می‌شود. این کار قابل بازگشت نیست.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            dao.deleteHabitLogsForHabit(habit.id)
+                            dao.deleteHabit(habit.id)
+                            Toast.makeText(context, "عادت حذف شد.", Toast.LENGTH_SHORT).show()
+                        }
+                        habitToDelete = null
+                    }
+                ) {
+                    Text("حذف عادت", color = Color(0xFFCC5A56))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { habitToDelete = null }) { Text("انصراف") }
+            }
+        )
     }
 }
 
 @Composable
-private fun AddHabitDialog(onDismiss: () -> Unit, onSave: (String, String, Int) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var icon by remember { mutableStateOf("🌱") }
-    var target by remember { mutableStateOf("۷") }
+private fun HabitEditorDialog(
+    initialHabit: Habit?,
+    onDismiss: () -> Unit,
+    onSave: (String, String, Int, String) -> Unit
+) {
+    var name by remember(initialHabit?.id) { mutableStateOf(initialHabit?.name.orEmpty()) }
+    var icon by remember(initialHabit?.id) { mutableStateOf(initialHabit?.icon ?: "🌱") }
+    var target by remember(initialHabit?.id) { mutableStateOf((initialHabit?.weeklyTarget ?: 7).toString()) }
+    var unit by remember(initialHabit?.id) { mutableStateOf(initialHabit?.unit ?: "بار") }
+    val parsedTarget = parseInputInt(target)
+    val canSave = name.isNotBlank() && parsedTarget != null && parsedTarget in 1..7 && unit.isNotBlank()
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("ساخت عادت تازه") },
+        title = { Text(if (initialHabit == null) "ساخت عادت تازه" else "ویرایش عادت") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("نام عادت") }, singleLine = true)
-                OutlinedTextField(icon, { icon = it }, label = { Text("ایموجی یا نماد") }, singleLine = true)
-                OutlinedTextField(target, { target = it.filter(Char::isDigit) }, label = { Text("هدف در هفته") }, singleLine = true)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("نام عادت") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = icon,
+                    onValueChange = { icon = it.take(4) },
+                    label = { Text("ایموجی یا نماد") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = target,
+                    onValueChange = { target = it.filter(Char::isDigit) },
+                    label = { Text("هدف در هفته (۱ تا ۷)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = unit,
+                    onValueChange = { unit = it },
+                    label = { Text("واحد هدف؛ مثل بار یا جلسه") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
-        confirmButton = { TextButton(onClick = { val n = parseInputInt(target); if (name.isNotBlank() && n != null && n in 1..7) onSave(name.trim(), icon.ifBlank { "✦" }, n) }) { Text("ذخیره") } },
+        confirmButton = {
+            TextButton(
+                enabled = canSave,
+                onClick = {
+                    onSave(
+                        name.trim(),
+                        icon.ifBlank { "✦" },
+                        parsedTarget ?: 7,
+                        unit.trim()
+                    )
+                }
+            ) {
+                Text(if (initialHabit == null) "افزودن عادت" else "ذخیره تغییرات")
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
 }
