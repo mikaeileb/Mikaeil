@@ -246,6 +246,22 @@ private fun OutlineButton(text: String, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, shape = RoundedCornerShape(14.dp)) { Text(text) }
 }
 
+private fun parseInputInt(value: String): Int? = persianToLatin(value).toIntOrNull()
+private fun parseInputLong(value: String): Long? = persianToLatin(value).toLongOrNull()
+private fun persianToLatin(value: String): String {
+    val persian = "۰۱۲۳۴۵۶۷۸۹"
+    val arabic = "٠١٢٣٤٥٦٧٨٩"
+    return value.map { ch ->
+        val p = persian.indexOf(ch)
+        val a = arabic.indexOf(ch)
+        when {
+            p >= 0 -> ('0'.code + p).toChar()
+            a >= 0 -> ('0'.code + a).toChar()
+            else -> ch
+        }
+    }.joinToString("")
+}
+
 private fun percent(value: Int, total: Int): Float =
     if (total <= 0) 0f else (value.toFloat() / total.toFloat()).coerceIn(0f, 1f)
 
@@ -378,7 +394,7 @@ private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessio
         ScreenHeader("مدیریت مطالعه", JalaliDate.format(today, true))
         SoftCard(color = MaterialTheme.colorScheme.primaryContainer) {
             Text("تایمر تمرکز", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text(timerSubject, fontSize = 13.sp, color = Muted)
+            OutlinedTextField(timerSubject, { timerSubject = it }, label = { Text("درس یا موضوع") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Text(
                 String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
                     .let { JalaliDate.toPersianDigits(it) },
@@ -471,7 +487,7 @@ private fun StudyEntryDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val value = minutes.toIntOrNull()
+                val value = parseInputInt(minutes)
                 if (name.isNotBlank() && value != null && value > 0) onSave(name.trim(), value, note.trim())
             }) { Text("ذخیره") }
         },
@@ -566,7 +582,7 @@ private fun AddBookDialog(onDismiss: () -> Unit, onSave: (String, String, Int, S
             }
         },
         confirmButton = {
-            TextButton(onClick = { val p = pages.toIntOrNull(); if (title.isNotBlank() && p != null && p > 0) onSave(title.trim(), author.trim(), p, category.trim()) }) { Text("افزودن") }
+            TextButton(onClick = { val p = parseInputInt(pages); if (title.isNotBlank() && p != null && p > 0) onSave(title.trim(), author.trim(), p, category.trim()) }) { Text("افزودن") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
@@ -586,7 +602,7 @@ private fun ReadPagesDialog(book: Book, onDismiss: () -> Unit, onSave: (Int, Str
                 OutlinedTextField(note, { note = it }, label = { Text("یادداشت کوتاه") })
             }
         },
-        confirmButton = { TextButton(onClick = { val n = pages.toIntOrNull(); if (n != null && n > 0) onSave(n, note) }) { Text("ثبت") } },
+        confirmButton = { TextButton(onClick = { val n = parseInputInt(pages); if (n != null && n > 0) onSave(n, note) }) { Text("ثبت") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
 }
@@ -661,7 +677,7 @@ private fun AddHabitDialog(onDismiss: () -> Unit, onSave: (String, String, Int) 
                 OutlinedTextField(target, { target = it.filter(Char::isDigit) }, label = { Text("هدف در هفته") }, singleLine = true)
             }
         },
-        confirmButton = { TextButton(onClick = { val n = target.toIntOrNull(); if (name.isNotBlank() && n != null && n in 1..7) onSave(name.trim(), icon.ifBlank { "✦" }, n) }) { Text("ذخیره") } },
+        confirmButton = { TextButton(onClick = { val n = parseInputInt(target); if (name.isNotBlank() && n != null && n in 1..7) onSave(name.trim(), icon.ifBlank { "✦" }, n) }) { Text("ذخیره") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
 }
@@ -750,7 +766,7 @@ private fun AddGoalDialog(onDismiss: () -> Unit, onSave: (String, Long) -> Unit)
                 OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("مبلغ هدف به تومان") }, singleLine = true)
             }
         },
-        confirmButton = { TextButton(onClick = { val n = amount.toLongOrNull(); if (title.isNotBlank() && n != null && n > 0) onSave(title.trim(), n) }) { Text("ثبت هدف") } },
+        confirmButton = { TextButton(onClick = { val n = parseInputLong(amount); if (title.isNotBlank() && n != null && n > 0) onSave(title.trim(), n) }) { Text("ثبت هدف") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
 }
@@ -762,7 +778,7 @@ private fun ContributionDialog(goal: SavingGoal, onDismiss: () -> Unit, onSave: 
         onDismissRequest = onDismiss,
         title = { Text("واریز به " + goal.title) },
         text = { OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("مبلغ به تومان") }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { amount.toLongOrNull()?.takeIf { it > 0 }?.let(onSave) }) { Text("ثبت واریز") } },
+        confirmButton = { TextButton(onClick = { parseInputLong(amount)?.takeIf { it > 0 }?.let(onSave) }) { Text("ثبت واریز") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
 }
@@ -787,7 +803,7 @@ private fun MoneyEntryDialog(onDismiss: () -> Unit, onSave: (String, Long, Strin
                 OutlinedTextField(category, { category = it }, label = { Text("دسته‌بندی") }, singleLine = true)
             }
         },
-        confirmButton = { TextButton(onClick = { val n = amount.toLongOrNull(); if (title.isNotBlank() && n != null && n > 0) onSave(title.trim(), n, type, category.trim()) }) { Text("ذخیره") } },
+        confirmButton = { TextButton(onClick = { val n = parseInputLong(amount); if (title.isNotBlank() && n != null && n > 0) onSave(title.trim(), n, type, category.trim()) }) { Text("ذخیره") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
     )
 }
