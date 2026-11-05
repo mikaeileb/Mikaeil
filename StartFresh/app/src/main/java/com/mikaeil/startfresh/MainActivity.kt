@@ -378,8 +378,12 @@ private fun HomeScreen(
 @Composable
 private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessions: List<StudySession>) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val preferences = remember { context.getSharedPreferences("start_fresh_settings", Context.MODE_PRIVATE) }
     val today = JalaliDate.todayKey()
     val todayMinutes = sessions.filter { it.date == today }.sumOf { it.minutes }
+    var dailyTarget by rememberSaveable { mutableIntStateOf(preferences.getInt("study_daily_target", 120)) }
+    var showTargetDialog by remember { mutableStateOf(false) }
     var running by rememberSaveable { mutableStateOf(false) }
     var seconds by rememberSaveable { mutableIntStateOf(0) }
     var pomodoroMode by rememberSaveable { mutableStateOf(false) }
@@ -458,7 +462,76 @@ private fun StudyScreen(dao: StartFreshDao, subjects: List<StudySubject>, sessio
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text("هدف روزانه", color = Muted, fontSize = 12.sp)
-                    Text("۱۲۰ دقیقه", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(JalaliDate.number(dailyTarget) + " دقیقه", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            ProgressLine(percent(todayMinutes, dailyTarget))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("هدف هفتگی: " + JalaliDate.number(dailyTarget * 7) + " دقیقه", color = Muted, fontSize = 11.sp)
+                TextButton(onClick = { showTargetDialog = true }) { Text("تغییر هدف") }
+            }
+            Text("هدف ماهانه پیشنهادی: " + JalaliDate.number(dailyTarget * 30) + " دقیقه", color = Muted, fontSize = 11.sp)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("جلسه‌های اخیر")
+            ActionButton("ثبت دستی", { showManual = true })
+        }
+        if (sessions.isEmpty()) EmptyHint("هنوز جلسه‌ای ثبت نشده. اولین جلسه‌ات را شروع کن.")
+        sessions.take(20).forEach { session ->
+            SoftCard {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(session.subjectName, fontWeight = FontWeight.Bold)
+                    Text(JalaliDate.number(session.minutes) + " دقیقه", color = MaterialTheme.colorScheme.primary)
+                }
+                Text(JalaliDate.format(session.date), color = Muted, fontSize = 11.sp)
+                if (session.note.isNotBlank()) Text(session.note, fontSize = 12.sp)
+                TextButton(onClick = { scope.launch { dao.deleteSession(session.id) } }) { Text("حذف جلسه", color = Color(0xFFCC5A56)) }
+            }
+        }
+    }
+
+    if (showTargetDialog) {
+        StudyTargetDialog(dailyTarget, onDismiss = { showTargetDialog = false }) { next ->
+            dailyTarget = next
+            preferences.edit().putInt("study_daily_target", next).apply()
+            showTargetDialog = false
+        }
+    }
+    if (showManual) {
+        StudyEntryDialog(subjects, onDismiss = { showManual = false }) { name, minutes, note ->
+            scope.launch {
+                val existing = subjects.firstOrNull { it.name.equals(name, true) }
+                val id = existing?.id ?: dao.insertSubject(StudySubject(name = name))
+                dao.insertSession(StudySession(subjectId = id, subjectName = name, date = today, minutes = minutes, note = note))
+            }
+            showManual = false
+        }
+    }
+}
+
+@Composable
+private fun StudyTargetDialog(current: Int, onDismiss: () -> Unit, onSave: (Int) -> Unit) {
+    var value by remember { mutableStateOf(current.toString()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("هدف روزانه مطالعه") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value, { value = it.filter(Char::isDigit) }, label = { Text("دقیقه در روز") }, singleLine = true)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(120, 180, 240).forEach { minutes ->
+                        FilterChip(selected = value == minutes.toString(), onClick = { value = minutes.toString() }, label = { Text(JalaliDate.number(minutes / 60) + " ساعت") })
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { parseInputInt(value)?.takeIf { it in 15..1440 }?.let(onSave) }) { Text("ذخیره") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } }
+    )
+}
+
+@Composable
+private fun StudyEntryDialog(
                 }
             }
             ProgressLine(percent(todayMinutes, 120))
