@@ -653,7 +653,7 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
                 Text(JalaliDate.number(book.pagesRead) + " از " + JalaliDate.number(book.totalPages) + " صفحه", color = Muted, fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ActionButton("ثبت مطالعه", { selectedBook = book }, Modifier.weight(1f))
-                    TextButton(onClick = { scope.launch { dao.deleteBook(book.id) } }) { Text("حذف", color = Color(0xFFCC5A56)) }
+                    TextButton(onClick = { scope.launch { dao.deleteBookLogsForBook(book.id); dao.deleteBook(book.id) } }) { Text("حذف", color = Color(0xFFCC5A56)) }
                 }
             }
         }
@@ -672,13 +672,16 @@ private fun BooksScreen(dao: StartFreshDao, books: List<Book>, logs: List<BookLo
         ReadPagesDialog(book, onDismiss = { selectedBook = null }) { pages, note ->
             scope.launch {
                 val next = (book.pagesRead + pages).coerceAtMost(book.totalPages)
+                val actualPages = (next - book.pagesRead).coerceAtLeast(0)
                 dao.updateBook(book.copy(pagesRead = next, status = if (next >= book.totalPages) "DONE" else "READING"))
-                val day = JalaliDate.todayKey()
-                val previous = dao.findBookLog(book.id, day)
-                if (previous == null) {
-                    dao.insertBookLog(BookLog(bookId = book.id, date = day, pages = pages, note = note))
-                } else {
-                    dao.insertBookLog(previous.copy(pages = previous.pages + pages, note = note.ifBlank { previous.note }))
+                if (actualPages > 0) {
+                    val day = JalaliDate.todayKey()
+                    val previous = dao.findBookLog(book.id, day)
+                    if (previous == null) {
+                        dao.insertBookLog(BookLog(bookId = book.id, date = day, pages = actualPages, note = note))
+                    } else {
+                        dao.insertBookLog(previous.copy(pages = previous.pages + actualPages, note = note.ifBlank { previous.note }))
+                    }
                 }
             }
             selectedBook = null
@@ -772,7 +775,7 @@ private fun HabitsScreen(dao: StartFreshDao, habits: List<Habit>, logs: List<Hab
                 }
                 val weekCount = logs.count { it.habitId == habit.id && it.completed && it.date >= JalaliDate.shift(today, -6) && it.date <= today }
                 ProgressLine(percent(weekCount, habit.weeklyTarget), Gold)
-                TextButton(onClick = { scope.launch { dao.deleteHabit(habit.id) } }) { Text("حذف عادت", color = Color(0xFFCC5A56)) }
+                TextButton(onClick = { scope.launch { dao.deleteHabitLogsForHabit(habit.id); dao.deleteHabit(habit.id) } }) { Text("حذف عادت", color = Color(0xFFCC5A56)) }
             }
         }
     }
@@ -1002,7 +1005,7 @@ private fun CalendarScreen(
             Text("دفتر روزانه", fontWeight = FontWeight.Bold)
             Text(journal?.highlight?.ifBlank { "بدون یادداشت" } ?: "یادداشتی برای این روز ثبت نشده", color = Muted, fontSize = 13.sp)
         }
-        Text("خالص واریزی پس‌انداز در این روز: " + toman(daySaving.coerceAtLeast(0)), color = Muted, fontSize = 12.sp)
+        Text("خالص واریزی پس‌انداز در این روز: " + toman(daySaving), color = Muted, fontSize = 12.sp)
     }
 }
 
